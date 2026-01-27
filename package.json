@@ -1,0 +1,37 @@
+{
+  "name": "@clawdbot/discord-user",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Clawdbot Discord user account (selfbot) channel plugin",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "clawdbot": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "dependencies": {
+    "discord.js-selfbot-v13": "^3.5.2"
+  },
+  "peerDependencies": {
+    "clawdbot": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "clawdbot",
+    "clawdbot-plugin",
+    "discord",
+    "selfbot",
+    "user-account"
+  ],
+  "license": "MIT"
+}
