@@ -1,21 +1,37 @@
 {
-  "name": "@clawdbot/discord-user",
+  "name": "@alex110709/discord-user",
   "version": "1.0.0",
   "type": "module",
   "description": "Clawdbot Discord user account (selfbot) channel plugin",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "clawdbot.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "clawdbot": {
     "extensions": [
       "./dist/index.js"
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HITEYY/clawdbot-discord-user.git"
+  },
+  "homepage": "https://github.com/HITEYY/clawdbot-discord-user#readme",
+  "bugs": {
+    "url": "https://github.com/HITEYY/clawdbot-discord-user/issues"
+  },
+  "author": "HITEYY",
+  "license": "MIT",
   "dependencies": {
     "discord.js-selfbot-v13": "^3.5.2"
   },
@@ -29,9 +45,14 @@
   "keywords": [
     "clawdbot",
     "clawdbot-plugin",
+    "clawdbot-extension",
     "discord",
+    "discord-selfbot",
     "selfbot",
-    "user-account"
+    "user-account",
+    "automation"
   ],
-  "license": "MIT"
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

@@ -1,4 +1,4 @@
-# @clawdbot/discord-user
+# @alex110709/discord-user
 
 Clawdbot plugin for Discord **user account** (selfbot) integration. This allows Clawdbot to act as a real Discord user, not a bot.
 
@@ -18,7 +18,7 @@ Clawdbot plugin for Discord **user account** (selfbot) integration. This allows 
 ### From npm (when published)
 
 ```bash
-clawdbot plugins install @clawdbot/discord-user
+clawdbot plugins install @alex110709/discord-user
 ```
 
 ### From local directory
