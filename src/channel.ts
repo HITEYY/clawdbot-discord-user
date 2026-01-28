@@ -1,7 +1,41 @@
 import type { ChannelPlugin } from "clawdbot/plugin-sdk";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "clawdbot/plugin-sdk";
-import { getDiscordUserRuntime } from "./runtime.js";
 import { DiscordUserClient, type DiscordUserAccount } from "./client.js";
+import { createRequire } from "node:module";
+
+// Dynamic import of Clawdbot internals (may break on version updates)
+let dispatchInboundMessage: ((params: any) => Promise<any>) | null = null;
+let createReplyDispatcherWithTyping: ((params: any) => any) | null = null;
+let buildAgentPeerSessionKey: ((params: any) => string) | null = null;
+let loadConfig: (() => any) | null = null;
+let clawdbotBasePath: string = "";
+
+async function initDispatch() {
+  try {
+    const require = createRequire(import.meta.url);
+    const clawdbotPath = require.resolve("clawdbot");
+    clawdbotBasePath = clawdbotPath.replace(/\/dist\/.*$/, "");
+    
+    const dispatchMod = await import(`${clawdbotBasePath}/dist/auto-reply/dispatch.js`);
+    dispatchInboundMessage = dispatchMod.dispatchInboundMessage;
+    
+    const dispatcherMod = await import(`${clawdbotBasePath}/dist/auto-reply/reply/reply-dispatcher.js`);
+    createReplyDispatcherWithTyping = dispatcherMod.createReplyDispatcherWithTyping;
+    
+    const sessionKeyMod = await import(`${clawdbotBasePath}/dist/routing/session-key.js`);
+    buildAgentPeerSessionKey = sessionKeyMod.buildAgentPeerSessionKey;
+    
+    const configMod = await import(`${clawdbotBasePath}/dist/config/config.js`);
+    loadConfig = configMod.loadConfig;
+    
+    console.log("[discord-user] Successfully loaded Clawdbot dispatch functions");
+  } catch (err) {
+    console.error("[discord-user] Failed to load Clawdbot dispatch functions:", err);
+  }
+}
+
+// Initialize on module load
+initDispatch();
 
 // Active client instances per account
 const clients = new Map<string, DiscordUserClient>();
@@ -317,9 +351,11 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       lastConnectedAt: null,
       lastError: null,
     },
-    collectStatusIssues: ({ account }) => {
+    collectStatusIssues: (params) => {
       const issues: Array<{ level: "error" | "warn" | "info"; message: string }> = [];
-      if (!account.token) {
+      // Handle case where account might not be resolved yet
+      const account = params?.account;
+      if (!account?.token) {
         issues.push({
           level: "error",
           message: "No token configured. Set channels.discord-user.token or DISCORD_USER_TOKEN env var.",
@@ -364,14 +400,147 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         config: ctx.cfg,
         runtime: ctx.runtime,
         onMessage: async (message) => {
-          // Forward to Clawdbot's message handler
-          const runtime = getDiscordUserRuntime();
-          if (runtime?.gateway?.handleInboundMessage) {
-            await runtime.gateway.handleInboundMessage({
+          ctx.log?.info(`[${account.accountId}] Received message from ${message.authorTag}: ${message.content.substring(0, 50)}...`);
+          
+          if (!dispatchInboundMessage || !createReplyDispatcherWithTyping || !buildAgentPeerSessionKey) {
+            ctx.log?.warn(`[${account.accountId}] Dispatch functions not available, skipping message`);
+            return;
+          }
+          
+          try {
+            const cfg = loadConfig?.() ?? ctx.cfg;
+            const client = clients.get(account.accountId);
+            
+            // Build session key using Clawdbot's internal function
+            const peerKind = message.isDM ? "dm" : message.isThread ? "thread" : "channel";
+            const peerId = message.isDM ? message.authorId : message.channelId;
+            
+            const sessionKey = buildAgentPeerSessionKey({
+              agentId: "main",
+              mainKey: "main",
               channel: "discord-user",
-              accountId: account.accountId,
-              message,
+              peerKind: peerKind,
+              peerId: peerId,
+              dmScope: "per-channel-peer", // Separate sessions per channel+peer
             });
+            
+            ctx.log?.info(`[${account.accountId}] Session key built: ${sessionKey}`);
+            
+            // Build inbound context (matching Clawdbot's expected format)
+            const inboundCtx: Record<string, any> = {
+              // Core identifiers - use built session key
+              SessionKey: sessionKey,
+              Provider: "discord-user",
+              Surface: "discord-user",
+              AccountId: account.accountId,
+              
+              // Message content
+              Body: message.content,
+              RawBody: message.content,
+              BodyForAgent: message.content,
+              BodyForCommands: message.content,
+              
+              // Chat info
+              ChatType: peerKind === "dm" ? "direct" : peerKind,
+              To: message.channelId,
+              From: message.authorId,
+              FromName: message.authorName,
+              FromTag: message.authorTag,
+              
+              // Message identifiers
+              MessageSid: message.id,
+              MessageSidFirst: message.id,
+              MessageSidLast: message.id,
+              
+              // Timestamps
+              Timestamp: message.timestamp,
+              
+              // Guild/Channel info
+              GuildId: message.guildId,
+              GuildName: message.guildName,
+              ChannelId: message.channelId,
+              ChannelName: message.channelName,
+              
+              // Reply reference
+              ReplyToId: message.replyToId,
+              
+              // Thread info
+              IsThread: message.isThread,
+              ThreadId: message.isThread ? message.channelId : undefined,
+              
+              // Mentions
+              Mentions: message.mentions,
+              WasMentioned: message.mentions?.some((m: any) => m.id === client?.user?.id) ?? false,
+              
+              // Authorization (allow commands for DMs, restrict for channels)
+              CommandAuthorized: message.isDM || message.mentions?.some((m: any) => m.id === client?.user?.id),
+              
+              // Attachments
+              MediaUrls: message.attachments?.map((a: any) => a.url) ?? [],
+              Attachments: message.attachments,
+              
+              // Bot check
+              IsBot: message.isBot,
+              
+              // Force a specific model to avoid auth errors
+              Model: "google-antigravity/gemini-3-pro-high",
+            };
+            
+            // Create dispatcher with delivery callback
+            const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
+              deliver: async (payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string }) => {
+                ctx.log?.info(`[${account.accountId}] Delivering reply to ${message.channelId}: ${payload.text?.substring(0, 50)}...`);
+                
+                try {
+                  if (payload.text) {
+                    const result = await client?.sendMessage(message.channelId, payload.text, {
+                      replyTo: message.id,
+                    });
+                    ctx.log?.info(`[${account.accountId}] Message sent successfully: ${result?.id}`);
+                  }
+                  
+                  if (payload.mediaUrls) {
+                    for (const url of payload.mediaUrls) {
+                      await client?.sendMessage(message.channelId, "", {
+                        replyTo: message.id,
+                        mediaUrl: url,
+                      });
+                    }
+                  } else if (payload.mediaUrl) {
+                    await client?.sendMessage(message.channelId, "", {
+                      replyTo: message.id,
+                      mediaUrl: payload.mediaUrl,
+                    });
+                  }
+                } catch (deliverErr) {
+                  ctx.log?.error(`[${account.accountId}] Failed to send message: ${deliverErr}`);
+                  throw deliverErr;
+                }
+              },
+              onTypingStart: async () => {
+                // Optional: send typing indicator
+                ctx.log?.debug?.(`[${account.accountId}] Typing started`);
+              },
+              onTypingStop: async () => {
+                ctx.log?.debug?.(`[${account.accountId}] Typing stopped`);
+              },
+              onError: (err: unknown, info: { kind: string }) => {
+                ctx.log?.error(`[${account.accountId}] Reply error (${info.kind}): ${err}`);
+              },
+            });
+            
+            // Dispatch the message
+            await dispatchInboundMessage({
+              ctx: inboundCtx,
+              cfg,
+              dispatcher,
+              replyOptions,
+            });
+            
+            markDispatchIdle();
+            ctx.log?.info(`[${account.accountId}] Message dispatched successfully`);
+          } catch (err) {
+            ctx.log?.error(`[${account.accountId}] Dispatch failed: ${err}`);
           }
         },
         onReady: (user) => {
