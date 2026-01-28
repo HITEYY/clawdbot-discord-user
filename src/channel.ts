@@ -282,30 +282,64 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     listGroups: async () => [],
   },
   actions: {
-    listActions: () => ["react"],
-    supportsAction: ({ action }) => action === "react",
+    listActions: () => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds"],
+    supportsAction: ({ action }) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds"].includes(action),
     handleAction: async ({ action, params, cfg, accountId }) => {
-      if (action !== "react") {
-        throw new Error(`Action ${action} is not supported for discord-user.`);
-      }
       const account = resolveDiscordUserAccount({ cfg, accountId });
       const client = clients.get(account.accountId);
       if (!client) {
         return { ok: false, error: "Discord user client not running" };
       }
 
-      const channelId = params.channelId || params.to;
-      const messageId = params.messageId;
-      const emoji = params.emoji;
-      const remove = params.remove === true;
-
-      if (!channelId || !messageId) {
-        return { ok: false, error: "Missing channelId or messageId" };
-      }
-
       try {
-        await client.react(channelId, messageId, emoji, remove);
-        return { ok: true };
+        if (action === "react") {
+          const channelId = params.channelId || params.to;
+          const messageId = params.messageId;
+          const emoji = params.emoji;
+          const remove = params.remove === true;
+
+          if (!channelId || !messageId) {
+            return { ok: false, error: "Missing channelId or messageId" };
+          }
+          await client.react(channelId, messageId, emoji, remove);
+          return { ok: true };
+        }
+        
+        if (action === "setStatus") {
+            const status = params.status || params.text;
+            const type = params.type || "PLAYING";
+            if (!status) return { ok: false, error: "Missing status text" };
+            await client.setStatus(status, type);
+            return { ok: true };
+        }
+
+        if (action === "addFriend") { // Accept request or add friend
+            const userId = params.userId || params.to;
+            if (!userId) return { ok: false, error: "Missing userId" };
+            await client.acceptFriendRequest(userId);
+            return { ok: true };
+        }
+
+        if (action === "removeFriend") { // Reject request or remove friend
+             const userId = params.userId || params.to;
+             if (!userId) return { ok: false, error: "Missing userId" };
+             await client.removeFriend(userId);
+             return { ok: true };
+        }
+
+        if (action === "leaveGuild") {
+             const guildId = params.guildId;
+             if (!guildId) return { ok: false, error: "Missing guildId" };
+             await client.leaveGuild(guildId);
+             return { ok: true };
+        }
+        
+        if (action === "listGuilds") {
+            const guilds = await client.getGuilds();
+            return { ok: true, data: guilds };
+        }
+
+        throw new Error(`Action ${action} is not supported for discord-user.`);
       } catch (err) {
         return { ok: false, error: String(err) };
       }
@@ -518,8 +552,13 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
                 }
               },
               onTypingStart: async () => {
-                // Optional: send typing indicator
+                // Send typing indicator
                 ctx.log?.debug?.(`[${account.accountId}] Typing started`);
+                try {
+                    await client?.typing(message.channelId);
+                } catch (e) {
+                    // Ignore typing errors (e.g. lack of perms)
+                }
               },
               onTypingStop: async () => {
                 ctx.log?.debug?.(`[${account.accountId}] Typing stopped`);

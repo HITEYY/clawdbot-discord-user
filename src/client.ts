@@ -301,6 +301,49 @@ export class DiscordUserClient {
     await textChannel.sendTyping();
   }
 
+  async setStatus(status: string, type: "PLAYING" | "WATCHING" | "LISTENING" | "COMPETING" | "STREAMING" = "PLAYING"): Promise<void> {
+    if (!this.client.user) throw new Error("Client not logged in");
+    this.client.user.setActivity(status, { type });
+  }
+
+  async acceptFriendRequest(userId: string): Promise<void> {
+    const user = await this.client.users.fetch(userId);
+    // In selfbot-v13, sending a friend request to someone who sent you one accepts it
+    // Or accessing the relationship manager
+    await this.client.users.cache.get(userId)?.sendFriendRequest();
+    // Alternatively try to add friend directly if available on relationship manager
+    // @ts-ignore
+    if (this.client.relationships) {
+       // @ts-ignore
+       await this.client.relationships.addFriend(userId);
+    }
+  }
+
+  async removeFriend(userId: string): Promise<void> {
+     // @ts-ignore
+     if (this.client.relationships) {
+       // @ts-ignore
+       await this.client.relationships.deleteFriend(userId);
+     } else {
+        const user = await this.client.users.fetch(userId);
+        // @ts-ignore
+        await user.removeFriend();
+     }
+  }
+  
+  async getGuilds(): Promise<Array<{ id: string; name: string; memberCount: number }>> {
+      return this.client.guilds.cache.map(g => ({
+          id: g.id,
+          name: g.name,
+          memberCount: g.memberCount
+      }));
+  }
+
+  async leaveGuild(guildId: string): Promise<void> {
+      const guild = await this.client.guilds.fetch(guildId);
+      await guild.leave();
+  }
+
   async fetchMessages(
     channelId: string,
     limit = 10
