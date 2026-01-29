@@ -1,5 +1,5 @@
-import type { ChannelPlugin } from "clawdbot/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "clawdbot/plugin-sdk";
+import type { ChannelPlugin, ChannelMessageActionAdapter } from "clawdbot/plugin-sdk";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId, getChatChannelMeta } from "clawdbot/plugin-sdk";
 import { DiscordUserClient, type DiscordUserAccount } from "./client.js";
 import { createRequire } from "node:module";
 
@@ -59,14 +59,12 @@ export interface ResolvedDiscordUserAccount {
 function listDiscordUserAccountIds(cfg: any): string[] {
   const accounts = cfg.channels?.["discord-user"]?.accounts;
   if (!accounts || typeof accounts !== "object") {
-    // Check for top-level token
     if (cfg.channels?.["discord-user"]?.token || process.env.DISCORD_USER_TOKEN) {
       return [DEFAULT_ACCOUNT_ID];
     }
     return [];
   }
   const ids = Object.keys(accounts);
-  // Include default if top-level token exists
   if (
     !ids.includes(DEFAULT_ACCOUNT_ID) &&
     (cfg.channels?.["discord-user"]?.token || process.env.DISCORD_USER_TOKEN)
@@ -85,7 +83,6 @@ function resolveDiscordUserAccount(params: {
   const channelCfg = cfg.channels?.["discord-user"] ?? {};
   const accountCfg = channelCfg.accounts?.[resolvedId] ?? {};
 
-  // For default account, check top-level and env
   let token: string | undefined;
   let tokenSource: "config" | "env" | "none" = "none";
 
@@ -126,20 +123,21 @@ function resolveDefaultDiscordUserAccountId(cfg: any): string {
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
 }
 
+const meta = getChatChannelMeta("discord");
+
 export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
   id: "discord-user",
   meta: {
+    ...meta,
     id: "discord-user",
     label: "Discord User",
     selectionLabel: "Discord (User Account)",
-    docsPath: "/plugins/discord-user",
-    docsLabel: "discord-user",
     blurb: "Discord user account (selfbot) integration - act as a real Discord user.",
     aliases: ["discord-selfbot", "discorduser"],
   },
   capabilities: {
     chatTypes: ["direct", "channel", "thread"],
-    polls: false, // User accounts can't create polls
+    polls: false, 
     reactions: true,
     threads: true,
     media: true,
@@ -251,11 +249,9 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     normalizeTarget: (target) => {
       if (!target) return null;
       const trimmed = target.trim();
-      // Handle user:ID or channel:ID format
       if (trimmed.startsWith("user:") || trimmed.startsWith("channel:")) {
         return trimmed;
       }
-      // Handle raw IDs (snowflakes)
       if (/^\d{17,20}$/.test(trimmed)) {
         return trimmed;
       }
@@ -313,14 +309,14 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             return { ok: true };
         }
 
-        if (action === "addFriend") { // Accept request or add friend
+        if (action === "addFriend") {
             const userId = params.userId || params.to;
             if (!userId) return { ok: false, error: "Missing userId" };
             await client.acceptFriendRequest(userId);
             return { ok: true };
         }
 
-        if (action === "removeFriend") { // Reject request or remove friend
+        if (action === "removeFriend") {
              const userId = params.userId || params.to;
              if (!userId) return { ok: false, error: "Missing userId" };
              await client.removeFriend(userId);
@@ -394,7 +390,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
     collectStatusIssues: (params) => {
       const issues: Array<{ level: "error" | "warn" | "info"; message: string }> = [];
-      // Handle case where account might not be resolved yet
       const account = params?.account;
       if (!account?.token) {
         issues.push({
@@ -412,7 +407,12 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       lastConnectedAt: snapshot.lastConnectedAt ?? null,
       lastError: snapshot.lastError ?? null,
     }),
-    buildAccountSnapshot: ({ account, runtime }) => ({
+    probeAccount: async ({ account }) => {
+        if (!account.token) return { ok: false, error: "missing token" };
+        const dummyClient = new DiscordUserClient({ token: account.token } as any);
+        return await dummyClient.probe(account.token);
+    },
+    buildAccountSnapshot: ({ account, runtime, probe }) => ({
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
@@ -422,6 +422,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       connected: runtime?.connected ?? false,
       lastConnectedAt: runtime?.lastConnectedAt ?? null,
       lastError: runtime?.lastError ?? null,
+      probe,
     }),
   },
   gateway: {
@@ -441,10 +442,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         config: ctx.cfg,
         runtime: ctx.runtime,
         onMessage: async (message) => {
-          ctx.log?.info(`[${account.accountId}] Received message from ${message.authorTag}: ${message.content.substring(0, 50)}...`);
-          
           if (!dispatchInboundMessage || !createReplyDispatcherWithTyping || !buildAgentPeerSessionKey) {
-            ctx.log?.warn(`[${account.accountId}] Dispatch functions not available, skipping message`);
             return;
           }
           
@@ -452,16 +450,13 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             const cfg = loadConfig?.() ?? ctx.cfg;
             const client = clients.get(account.accountId);
 
-            // In server/channel/thread (non-DM), check if bot was mentioned
             const isDM = message.isDM;
             const wasMentioned = message.mentions?.some((m: any) => m.id === client?.user?.id) ?? false;
             
             if (!isDM && !wasMentioned) {
-              ctx.log?.debug?.(`[${account.accountId}] Ignoring message in ${message.channelId} (no mention)`);
               return;
             }
             
-            // Build session key using Clawdbot's internal function
             const peerKind = message.isDM ? "dm" : message.isThread ? "thread" : "channel";
             const peerId = message.isDM ? message.authorId : message.channelId;
             
@@ -471,94 +466,55 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
               channel: "discord-user",
               peerKind: peerKind,
               peerId: peerId,
-              dmScope: "per-channel-peer", // Separate sessions per channel+peer
+              dmScope: "per-channel-peer",
             });
             
-            ctx.log?.info(`[${account.accountId}] Session key built: ${sessionKey}`);
-            
-            // Build inbound context (matching Clawdbot's expected format)
             const inboundCtx: Record<string, any> = {
-              // Core identifiers - use built session key
               SessionKey: sessionKey,
               Provider: "discord-user",
               Surface: "discord-user",
               AccountId: account.accountId,
-              
-              // Message content
               Body: message.content,
               RawBody: message.content,
               BodyForAgent: message.content,
               BodyForCommands: message.content,
-              
-              // Chat info
               ChatType: peerKind === "dm" ? "direct" : peerKind,
               To: message.channelId,
               From: message.authorId,
               FromName: message.authorName,
               FromTag: message.authorTag,
-              
-              // Message identifiers
               MessageSid: message.id,
-              MessageSidFirst: message.id,
-              MessageSidLast: message.id,
-              
-              // Timestamps
               Timestamp: message.timestamp,
-              
-              // Guild/Channel info
               GuildId: message.guildId,
               GuildName: message.guildName,
               ChannelId: message.channelId,
               ChannelName: message.channelName,
-              
-              // Reply reference
               ReplyToId: message.replyToId,
-              
-              // Thread info
               IsThread: message.isThread,
-              ThreadId: message.isThread ? message.channelId : undefined,
-              
-              // Mentions
               Mentions: message.mentions,
-              WasMentioned: message.mentions?.some((m: any) => m.id === client?.user?.id) ?? false,
-              
-              // Authorization (allow commands for DMs, restrict for channels)
-              CommandAuthorized: message.isDM || message.mentions?.some((m: any) => m.id === client?.user?.id),
-              
-              // Attachments
+              WasMentioned: wasMentioned,
+              CommandAuthorized: message.isDM || wasMentioned,
               MediaUrls: message.attachments?.map((a: any) => a.url) ?? [],
               Attachments: message.attachments,
-              
-              // Bot check
               IsBot: message.isBot,
-              
-              // Force a specific model to avoid auth errors
-              Model: "google-antigravity/gemini-3-pro-high",
             };
             
             let thinkingMessageId: string | undefined;
 
-            // Create dispatcher with delivery callback
             const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
               deliver: async (payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string }) => {
-                ctx.log?.info(`[${account.accountId}] Delivering reply to ${message.channelId}: ${payload.text?.substring(0, 50)}...`);
-                
                 try {
-                  // Delete thinking message if exists
                   if (thinkingMessageId) {
                     try {
                       await client?.deleteMessage(message.channelId, thinkingMessageId);
                       thinkingMessageId = undefined;
-                    } catch (e) {
-                      // Ignore deletion errors
-                    }
+                    } catch (e) {}
                   }
 
                   if (payload.text) {
-                    const result = await client?.sendMessage(message.channelId, payload.text, {
+                    await client?.sendMessage(message.channelId, payload.text, {
                       replyTo: message.id,
                     });
-                    ctx.log?.info(`[${account.accountId}] Message sent successfully: ${result?.id}`);
                   }
                   
                   if (payload.mediaUrls) {
@@ -580,29 +536,19 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
                 }
               },
               onTypingStart: async () => {
-                // Send typing indicator
-                ctx.log?.debug?.(`[${account.accountId}] Typing started`);
                 try {
                     await client?.typing(message.channelId);
-                    
-                    // Also send a temporary thinking message
                     const botName = client?.user?.username || "AI";
                     const result = await client?.sendMessage(message.channelId, `*${botName}님이 입력중입니다...*`);
                     thinkingMessageId = result.id;
-                } catch (e) {
-                    // Ignore typing errors (e.g. lack of perms)
-                }
+                } catch (e) {}
               },
               onTypingStop: async () => {
-                ctx.log?.debug?.(`[${account.accountId}] Typing stopped`);
-                // If the thinking message wasn't deleted by deliver yet (e.g. error or empty reply), delete it now
                 if (thinkingMessageId) {
                     try {
                       await client?.deleteMessage(message.channelId, thinkingMessageId);
                       thinkingMessageId = undefined;
-                    } catch (e) {
-                      // Ignore
-                    }
+                    } catch (e) {}
                 }
               },
               onError: (err: unknown, info: { kind: string }) => {
@@ -610,7 +556,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
               },
             });
             
-            // Dispatch the message
             await dispatchInboundMessage({
               ctx: inboundCtx,
               cfg,
@@ -619,7 +564,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             });
             
             markDispatchIdle();
-            ctx.log?.info(`[${account.accountId}] Message dispatched successfully`);
           } catch (err) {
             ctx.log?.error(`[${account.accountId}] Dispatch failed: ${err}`);
           }
@@ -651,18 +595,13 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       });
 
       clients.set(account.accountId, client);
-
-      // Start the client
       await client.start();
 
-      // Handle abort signal
       ctx.abortSignal?.addEventListener("abort", () => {
-        ctx.log?.info(`[${account.accountId}] Stopping Discord user client...`);
         client.stop();
         clients.delete(account.accountId);
       });
 
-      // Return a promise that resolves when the client stops
       return new Promise<void>((resolve) => {
         const checkInterval = setInterval(() => {
           if (!client.isRunning) {
@@ -675,3 +614,4 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
   },
 };
+

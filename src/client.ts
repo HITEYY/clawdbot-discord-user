@@ -1,4 +1,4 @@
-import { Client, Message, TextChannel, DMChannel, ThreadChannel, NewsChannel } from "discord.js-selfbot-v13";
+import { Client, Message, TextChannel, DMChannel, ThreadChannel, NewsChannel, Invite } from "discord.js-selfbot-v13";
 
 export interface DiscordUserAccount {
   accountId: string;
@@ -23,7 +23,7 @@ export interface InboundMessage {
     contentType?: string;
     size: number;
   }>;
-  mentions: string[];
+  mentions: Array<{ id: string; username: string }>;
   isBot: boolean;
   isDM: boolean;
   isThread: boolean;
@@ -54,7 +54,6 @@ export class DiscordUserClient {
     // @ts-ignore - discord.js-selfbot-v13 has different options
     this.client = new Client({
       checkUpdate: false,
-      // Selfbot intents - we want everything
       ws: {
         properties: {
           browser: "Discord Client",
@@ -150,7 +149,7 @@ export class DiscordUserClient {
         contentType: att.contentType ?? undefined,
         size: att.size,
       })),
-      mentions: message.mentions.users.map((u) => u.id),
+      mentions: message.mentions.users.map((u) => ({ id: u.id, username: u.username })),
       isBot: message.author.bot,
       isDM,
       isThread,
@@ -183,7 +182,6 @@ export class DiscordUserClient {
     content: string,
     options?: { replyTo?: string; mediaUrl?: string }
   ): Promise<{ id: string }> {
-    // Parse target - can be channel:ID, user:ID, or raw ID
     let channelId = target;
     let isUser = false;
 
@@ -197,7 +195,6 @@ export class DiscordUserClient {
     let channel: TextChannel | DMChannel | ThreadChannel | NewsChannel;
 
     if (isUser) {
-      // Create or fetch DM channel
       const user = await this.client.users.fetch(channelId);
       channel = await user.createDM();
     } else {
@@ -208,7 +205,6 @@ export class DiscordUserClient {
       channel = fetched as TextChannel | DMChannel | ThreadChannel | NewsChannel;
     }
 
-    // Build message options
     const messageOptions: any = {};
 
     if (options?.replyTo) {
@@ -222,7 +218,6 @@ export class DiscordUserClient {
       messageOptions.files = [options.mediaUrl];
     }
 
-    // Send message
     const sent = await channel.send({
       content: content || undefined,
       ...messageOptions,
@@ -246,7 +241,6 @@ export class DiscordUserClient {
     const message = await textChannel.messages.fetch(messageId);
 
     if (remove) {
-      // Remove reaction
       const reaction = message.reactions.cache.find((r) => {
         if (!emoji) return true;
         return r.emoji.name === emoji || r.emoji.toString() === emoji;
@@ -255,7 +249,6 @@ export class DiscordUserClient {
         await reaction.users.remove(this.client.user!.id);
       }
     } else if (emoji) {
-      // Add reaction
       await message.react(emoji);
     }
   }
@@ -273,7 +266,6 @@ export class DiscordUserClient {
     const textChannel = channel as TextChannel | DMChannel | ThreadChannel | NewsChannel;
     const message = await textChannel.messages.fetch(messageId);
 
-    // Can only edit own messages
     if (message.author.id !== this.client.user?.id) {
       throw new Error("Can only edit own messages");
     }
@@ -303,19 +295,18 @@ export class DiscordUserClient {
 
   async setStatus(status: string, type: "PLAYING" | "WATCHING" | "LISTENING" | "COMPETING" | "STREAMING" = "PLAYING"): Promise<void> {
     if (!this.client.user) throw new Error("Client not logged in");
-    this.client.user.setActivity(status, { type });
+    this.client.user.setActivity(status, { type: type as any });
   }
 
   async acceptFriendRequest(userId: string): Promise<void> {
-    const user = await this.client.users.fetch(userId);
-    // In selfbot-v13, sending a friend request to someone who sent you one accepts it
-    // Or accessing the relationship manager
-    await this.client.users.cache.get(userId)?.sendFriendRequest();
-    // Alternatively try to add friend directly if available on relationship manager
     // @ts-ignore
     if (this.client.relationships) {
        // @ts-ignore
        await this.client.relationships.addFriend(userId);
+    } else {
+        const user = await this.client.users.fetch(userId);
+        // @ts-ignore
+        await user.sendFriendRequest();
     }
   }
 
@@ -363,4 +354,27 @@ export class DiscordUserClient {
 
     return messages.map((m) => this.transformMessage(m)).reverse();
   }
+
+  async probe(token: string): Promise<any> {
+      // Create a temporary client to probe
+      const tempClient = new Client({ checkUpdate: false } as any);
+      try {
+          await tempClient.login(token);
+          const user = tempClient.user;
+          const result = {
+              ok: true,
+              user: user ? {
+                  id: user.id,
+                  username: user.username,
+                  tag: user.tag
+              } : null
+          };
+          tempClient.destroy();
+          return result;
+      } catch (err) {
+          tempClient.destroy();
+          return { ok: false, error: String(err) };
+      }
+  }
 }
+
