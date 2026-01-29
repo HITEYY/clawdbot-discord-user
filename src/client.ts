@@ -344,6 +344,11 @@ export class DiscordUserClient {
       await guild.leave();
   }
 
+  async joinGuild(inviteCode: string): Promise<void> {
+    // @ts-ignore - acceptInvite is a selfbot-specific method
+    await this.client.acceptInvite(inviteCode);
+  }
+
   async fetchMessages(
     channelId: string,
     limit = 10

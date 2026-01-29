@@ -282,8 +282,8 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     listGroups: async () => [],
   },
   actions: {
-    listActions: () => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds"],
-    supportsAction: ({ action }) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds"].includes(action),
+    listActions: () => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"],
+    supportsAction: ({ action }) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"].includes(action),
     handleAction: async ({ action, params, cfg, accountId }) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       const client = clients.get(account.accountId);
@@ -337,6 +337,13 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         if (action === "listGuilds") {
             const guilds = await client.getGuilds();
             return { ok: true, data: guilds };
+        }
+
+        if (action === "joinGuild") {
+            const inviteCode = params.inviteCode || params.code || params.invite;
+            if (!inviteCode) return { ok: false, error: "Missing inviteCode" };
+            await client.joinGuild(inviteCode);
+            return { ok: true };
         }
 
         throw new Error(`Action ${action} is not supported for discord-user.`);
@@ -520,12 +527,24 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
               Model: "google-antigravity/gemini-3-pro-high",
             };
             
+            let thinkingMessageId: string | undefined;
+
             // Create dispatcher with delivery callback
             const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
               deliver: async (payload: { text?: string; mediaUrls?: string[]; mediaUrl?: string }) => {
                 ctx.log?.info(`[${account.accountId}] Delivering reply to ${message.channelId}: ${payload.text?.substring(0, 50)}...`);
                 
                 try {
+                  // Delete thinking message if exists
+                  if (thinkingMessageId) {
+                    try {
+                      await client?.deleteMessage(message.channelId, thinkingMessageId);
+                      thinkingMessageId = undefined;
+                    } catch (e) {
+                      // Ignore deletion errors
+                    }
+                  }
+
                   if (payload.text) {
                     const result = await client?.sendMessage(message.channelId, payload.text, {
                       replyTo: message.id,
@@ -556,12 +575,26 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
                 ctx.log?.debug?.(`[${account.accountId}] Typing started`);
                 try {
                     await client?.typing(message.channelId);
+                    
+                    // Also send a temporary thinking message
+                    const botName = client?.user?.username || "AI";
+                    const result = await client?.sendMessage(message.channelId, `*${botName}님이 입력중입니다...*`);
+                    thinkingMessageId = result.id;
                 } catch (e) {
                     // Ignore typing errors (e.g. lack of perms)
                 }
               },
               onTypingStop: async () => {
                 ctx.log?.debug?.(`[${account.accountId}] Typing stopped`);
+                // If the thinking message wasn't deleted by deliver yet (e.g. error or empty reply), delete it now
+                if (thinkingMessageId) {
+                    try {
+                      await client?.deleteMessage(message.channelId, thinkingMessageId);
+                      thinkingMessageId = undefined;
+                    } catch (e) {
+                      // Ignore
+                    }
+                }
               },
               onError: (err: unknown, info: { kind: string }) => {
                 ctx.log?.error(`[${account.accountId}] Reply error (${info.kind}): ${err}`);
