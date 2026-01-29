@@ -451,6 +451,15 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           try {
             const cfg = loadConfig?.() ?? ctx.cfg;
             const client = clients.get(account.accountId);
+
+            // In server/channel/thread (non-DM), check if bot was mentioned
+            const isDM = message.isDM;
+            const wasMentioned = message.mentions?.some((m: any) => m.id === client?.user?.id) ?? false;
+            
+            if (!isDM && !wasMentioned) {
+              ctx.log?.debug?.(`[${account.accountId}] Ignoring message in ${message.channelId} (no mention)`);
+              return;
+            }
             
             // Build session key using Clawdbot's internal function
             const peerKind = message.isDM ? "dm" : message.isThread ? "thread" : "channel";
