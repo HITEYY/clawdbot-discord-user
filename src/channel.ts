@@ -148,10 +148,10 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
   },
   reload: { configPrefixes: ["channels.discord-user"] },
   config: {
-    listAccountIds: (cfg) => listDiscordUserAccountIds(cfg),
-    resolveAccount: (cfg, accountId) => resolveDiscordUserAccount({ cfg, accountId }),
-    defaultAccountId: (cfg) => resolveDefaultDiscordUserAccountId(cfg),
-    setAccountEnabled: ({ cfg, accountId, enabled }) => {
+    listAccountIds: (cfg: any) => listDiscordUserAccountIds(cfg),
+    resolveAccount: (cfg: any, accountId: string) => resolveDiscordUserAccount({ cfg, accountId }),
+    defaultAccountId: (cfg: any) => resolveDefaultDiscordUserAccountId(cfg),
+    setAccountEnabled: ({ cfg, accountId, enabled }: any) => {
       const accountKey = accountId || DEFAULT_ACCOUNT_ID;
       const accounts = { ...cfg.channels?.["discord-user"]?.accounts };
       const existing = accounts[accountKey] ?? {};
@@ -172,7 +172,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         },
       };
     },
-    deleteAccount: ({ cfg, accountId }) => {
+    deleteAccount: ({ cfg, accountId }: any) => {
       const accountKey = accountId || DEFAULT_ACCOUNT_ID;
       const accounts = { ...cfg.channels?.["discord-user"]?.accounts };
       delete accounts[accountKey];
@@ -187,24 +187,24 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         },
       };
     },
-    isConfigured: (account) => Boolean(account.token?.trim()),
-    describeAccount: (account) => ({
+    isConfigured: (account: any) => Boolean(account.token?.trim()),
+    describeAccount: (account: any) => ({
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
       configured: Boolean(account.token?.trim()),
       tokenSource: account.tokenSource,
     }),
-    resolveAllowFrom: ({ cfg, accountId }) =>
+    resolveAllowFrom: ({ cfg, accountId }: any) =>
       resolveDiscordUserAccount({ cfg, accountId }).config.allowFrom ?? [],
-    formatAllowFrom: ({ allowFrom }) =>
+    formatAllowFrom: ({ allowFrom }: any) =>
       allowFrom
-        .map((entry) => String(entry).trim())
+        .map((entry: any) => String(entry).trim())
         .filter(Boolean)
-        .map((entry) => entry.toLowerCase()),
+        .map((entry: any) => entry.toLowerCase()),
   },
   security: {
-    resolveDmPolicy: ({ cfg, accountId, account }) => {
+    resolveDmPolicy: ({ cfg, accountId, account }: any) => {
       const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
       const useAccountPath = Boolean(cfg.channels?.["discord-user"]?.accounts?.[resolvedAccountId]);
       const allowFromPath = useAccountPath
@@ -215,10 +215,10 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         allowFrom: account.config.allowFrom ?? [],
         allowFromPath,
         approveHint: `Add user ID to channels.discord-user.allowFrom or use /approve discord-user:<userId>`,
-        normalizeEntry: (raw) => raw.replace(/^(discord-user|user):/i, "").replace(/^<@!?(\d+)>$/, "$1"),
+        normalizeEntry: (raw: string) => raw.replace(/^(discord-user|user):/i, "").replace(/^<@!?(\d+)>$/, "$1"),
       };
     },
-    collectWarnings: ({ account, cfg }) => {
+    collectWarnings: ({ account, cfg }: any) => {
       const warnings: string[] = [];
       const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
       const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist";
@@ -233,11 +233,11 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
   },
   groups: {
-    resolveRequireMention: ({ cfg, accountId }) => {
+    resolveRequireMention: ({ cfg, accountId }: any) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       return account.config.groupPolicy !== "open";
     },
-    resolveToolPolicy: ({ cfg, accountId }) => {
+    resolveToolPolicy: ({ cfg, accountId }: any) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       return account.config.groupPolicy === "open" ? "full" : "default";
     },
@@ -246,7 +246,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     stripPatterns: () => ["<@!?\\d+>"],
   },
   messaging: {
-    normalizeTarget: (target) => {
+    normalizeTarget: (target: string) => {
       if (!target) return null;
       const trimmed = target.trim();
       if (trimmed.startsWith("user:") || trimmed.startsWith("channel:")) {
@@ -258,12 +258,12 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       return null;
     },
     targetResolver: {
-      looksLikeId: (input) => /^\d{17,20}$/.test(input) || /^(user|channel):\d{17,20}$/.test(input),
+      looksLikeId: (input: string) => /^\d{17,20}$/.test(input) || /^(user|channel):\d{17,20}$/.test(input),
       hint: "<channelId|user:ID|channel:ID>",
     },
   },
   directory: {
-    self: async ({ cfg, accountId }) => {
+    self: async ({ cfg, accountId }: any) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       const client = clients.get(account.accountId);
       if (!client?.user) return null;
@@ -279,8 +279,8 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
   },
   actions: {
     listActions: () => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"],
-    supportsAction: ({ action }) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"].includes(action),
-    handleAction: async ({ action, params, cfg, accountId }) => {
+    supportsAction: ({ action }: any) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"].includes(action),
+    handleAction: async ({ action, params, cfg, accountId }: any) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       const client = clients.get(account.accountId);
       if (!client) {
@@ -352,7 +352,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     deliveryMode: "direct",
     chunker: null,
     textChunkLimit: 2000,
-    sendText: async ({ to, text, accountId, replyToId }) => {
+    sendText: async ({ to, text, accountId, replyToId }: any) => {
       const client = clients.get(accountId ?? DEFAULT_ACCOUNT_ID);
       if (!client) {
         return { channel: "discord-user", ok: false, error: "Client not running" };
@@ -364,7 +364,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         return { channel: "discord-user", ok: false, error: String(err) };
       }
     },
-    sendMedia: async ({ to, text, mediaUrl, accountId, replyToId }) => {
+    sendMedia: async ({ to, text, mediaUrl, accountId, replyToId }: any) => {
       const client = clients.get(accountId ?? DEFAULT_ACCOUNT_ID);
       if (!client) {
         return { channel: "discord-user", ok: false, error: "Client not running" };
@@ -388,7 +388,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       lastConnectedAt: null,
       lastError: null,
     },
-    collectStatusIssues: (params) => {
+    collectStatusIssues: (params: any) => {
       const issues: Array<{ level: "error" | "warn" | "info"; message: string }> = [];
       const account = params?.account;
       if (!account?.token) {
@@ -399,7 +399,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       }
       return issues;
     },
-    buildChannelSummary: ({ snapshot }) => ({
+    buildChannelSummary: ({ snapshot }: any) => ({
       configured: snapshot.configured ?? false,
       tokenSource: snapshot.tokenSource ?? "none",
       running: snapshot.running ?? false,
@@ -407,12 +407,12 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       lastConnectedAt: snapshot.lastConnectedAt ?? null,
       lastError: snapshot.lastError ?? null,
     }),
-    probeAccount: async ({ account }) => {
+    probeAccount: async ({ account }: any) => {
         if (!account.token) return { ok: false, error: "missing token" };
         const dummyClient = new DiscordUserClient({ token: account.token } as any);
         return await dummyClient.probe(account.token);
     },
-    buildAccountSnapshot: ({ account, runtime, probe }) => ({
+    buildAccountSnapshot: ({ account, runtime, probe }: any) => ({
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
@@ -426,7 +426,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     }),
   },
   gateway: {
-    startAccount: async (ctx) => {
+    startAccount: async (ctx: any) => {
       const account = ctx.account;
       const token = account.token?.trim();
 
@@ -540,7 +540,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
                     await client?.typing(message.channelId);
                     const botName = client?.user?.username || "AI";
                     const result = await client?.sendMessage(message.channelId, `*${botName}님이 입력중입니다...*`);
-                    thinkingMessageId = result.id;
+                    thinkingMessageId = (result as any).id;
                 } catch (e) {}
               },
               onTypingStop: async () => {
@@ -568,7 +568,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             ctx.log?.error(`[${account.accountId}] Dispatch failed: ${err}`);
           }
         },
-        onReady: (user) => {
+        onReady: (user: any) => {
           ctx.log?.info(`[${account.accountId}] Connected as ${user.tag} (${user.id})`);
           ctx.setStatus({
             accountId: account.accountId,
@@ -578,7 +578,7 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             user: { id: user.id, tag: user.tag },
           });
         },
-        onError: (error) => {
+        onError: (error: any) => {
           ctx.log?.error(`[${account.accountId}] Error: ${error}`);
           ctx.setStatus({
             accountId: account.accountId,
@@ -614,4 +614,5 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
   },
 };
+
 

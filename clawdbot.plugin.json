@@ -1,0 +1,14 @@
+{
+  "id": "discord-user",
+  "name": "Discord User",
+  "description": "Discord user account (selfbot) integration - act as a real Discord user.",
+  "version": "1.0.1",
+  "author": "HITEYY",
+  "homepage": "https://github.com/HITEYY/clawdbot-discord-user",
+  "capabilities": {
+    "chatTypes": ["direct", "channel", "thread"],
+    "reactions": true,
+    "threads": true,
+    "media": true
+  }
+}
