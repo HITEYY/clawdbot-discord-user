@@ -180,7 +180,6 @@ The plugin also exposes action endpoints for advanced channel control:
 - `setStatus`
 - `addFriend` / `removeFriend`
 - `listGuilds` / `leaveGuild` / `joinGuild`
-<<<<<<< ours
 - Roles: `listRoles` / `createRole` / `editRole` / `deleteRole` / `addRoleToUser` / `removeRoleFromUser` / `setUserRoles`
 - Moderation: `setNickname` / `kickUser` / `banUser` / `unbanUser` / `timeoutUser`
 - Channels: `listChannels` / `createChannel` / `editChannel` / `deleteChannel`
@@ -223,8 +222,6 @@ message action=createChannel channel=discord-user guildId="GUILD_ID" name="ops-l
 # Edit slowmode on a channel
 message action=editChannel channel=discord-user channelId="CHANNEL_ID" slowmode=10
 ```
-=======
->>>>>>> theirs
 
 ## Security Considerations
 

@@ -588,7 +588,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       "setStatus",
       "addFriend",
       "removeFriend",
-<<<<<<< ours
       "callUser",
       "leaveGuild",
       "listGuilds",
@@ -613,11 +612,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       "voiceLeave",
       "voiceStatus",
       "setVoiceState",
-=======
-      "leaveGuild",
-      "listGuilds",
-      "joinGuild",
->>>>>>> theirs
       "editMessage",
       "deleteMessage",
       "typing",
@@ -631,7 +625,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         "setStatus",
         "addFriend",
         "removeFriend",
-<<<<<<< ours
         "callUser",
         "leaveGuild",
         "listGuilds",
@@ -656,11 +649,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         "voiceLeave",
         "voiceStatus",
         "setVoiceState",
-=======
-        "leaveGuild",
-        "listGuilds",
-        "joinGuild",
->>>>>>> theirs
         "editMessage",
         "deleteMessage",
         "typing",
@@ -709,7 +697,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           if (!userId) return { ok: false, error: "Missing userId" };
           await client.removeFriend(userId);
           return { ok: true };
-<<<<<<< ours
         }
 
         if (action === "callUser") {
@@ -717,8 +704,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           if (!userId) return { ok: false, error: "Missing or invalid userId" };
           const data = await client.callUser(userId);
           return { ok: true, data };
-=======
->>>>>>> theirs
         }
 
         if (action === "leaveGuild") {
@@ -740,7 +725,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           return { ok: true };
         }
 
-<<<<<<< ours
         if (action === "listRoles") {
           const guildId = normalizeDiscordGuildTarget(params.guildId);
           if (!guildId) return { ok: false, error: "Missing or invalid guildId" };
@@ -1112,9 +1096,6 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           const data = await client.getVoiceStatus();
           return { ok: true, data };
         }
-
-=======
->>>>>>> theirs
         if (action === "editMessage") {
           const channelId = params.channelId || params.to;
           const messageId = params.messageId;
