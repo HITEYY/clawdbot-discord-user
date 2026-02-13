@@ -49,7 +49,7 @@ export interface ResolvedDiscordUserAccount {
   config: {
     dmPolicy?: "open" | "pairing" | "allowlist";
     allowFrom?: string[];
-    groupPolicy?: "open" | "allowlist";
+    groupPolicy?: "open" | "allowlist" | "disabled";
     guilds?: Record<string, { enabled?: boolean; channels?: Record<string, boolean> }>;
     mediaMaxMb?: number;
     historyLimit?: number;
@@ -121,6 +121,303 @@ function resolveDiscordUserAccount(params: {
 function resolveDefaultDiscordUserAccountId(cfg: any): string {
   const ids = listDiscordUserAccountIds(cfg);
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
+}
+
+type DiscordUserGroupPolicy = "open" | "allowlist" | "disabled";
+type DiscordUserGuildMap = Record<string, { enabled?: boolean; channels?: Record<string, boolean> }>;
+
+function normalizeDiscordUserId(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "*") return null;
+  const mention = trimmed.match(/^<@!?(\d+)>$/);
+  const cleaned = (mention?.[1] ?? trimmed)
+    .replace(/^(discord-user|discord|user):/i, "")
+    .trim();
+  return /^\d+$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordGuildKey(raw: string): string | "*" | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed === "*") return "*";
+  const cleaned = trimmed.replace(/^(discord-user|discord|guild|server):/i, "").trim();
+  if (cleaned === "*") return "*";
+  return /^\d+$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordChannelKey(raw: string): string | "*" | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed === "*") return "*";
+  const mention = trimmed.match(/^<#(\d+)>$/);
+  const cleaned = (mention?.[1] ?? trimmed)
+    .replace(/^(discord-user|discord|channel|group):/i, "")
+    .trim();
+  if (cleaned === "*") return "*";
+  return /^\d+$/.test(cleaned) ? cleaned : null;
+}
+
+function resolveDiscordUserGroupPolicy(account: ResolvedDiscordUserAccount, cfg: any): DiscordUserGroupPolicy {
+  const raw = account.config.groupPolicy ?? cfg.channels?.defaults?.groupPolicy ?? "allowlist";
+  return raw === "open" || raw === "allowlist" || raw === "disabled" ? raw : "allowlist";
+}
+
+function resolveDiscordUserGuildEntry(
+  guilds: DiscordUserGuildMap | undefined,
+  guildId: string | undefined
+): { enabled?: boolean; channels?: Record<string, boolean> } | null {
+  if (!guilds || typeof guilds !== "object") return null;
+  if (guildId && guilds[guildId]) return guilds[guildId];
+
+  let wildcardEntry: { enabled?: boolean; channels?: Record<string, boolean> } | null = null;
+  for (const [rawKey, entry] of Object.entries(guilds)) {
+    const normalized = normalizeDiscordGuildKey(rawKey);
+    if (!normalized) continue;
+    if (normalized === "*" && wildcardEntry == null) {
+      wildcardEntry = entry;
+      continue;
+    }
+    if (guildId && normalized === guildId) {
+      return entry;
+    }
+  }
+
+  return wildcardEntry;
+}
+
+function resolveDiscordUserChannelAllowed(
+  channels: Record<string, boolean> | undefined,
+  channelId: string,
+  fallback: boolean
+): boolean {
+  if (!channels || typeof channels !== "object" || Object.keys(channels).length === 0) {
+    return fallback;
+  }
+
+  if (typeof channels[channelId] === "boolean") {
+    return channels[channelId];
+  }
+
+  let wildcard: boolean | undefined;
+  for (const [rawKey, allowed] of Object.entries(channels)) {
+    if (typeof allowed !== "boolean") continue;
+    const normalized = normalizeDiscordChannelKey(rawKey);
+    if (!normalized) continue;
+    if (normalized === channelId) return allowed;
+    if (normalized === "*") wildcard = allowed;
+  }
+
+  if (typeof wildcard === "boolean") {
+    return wildcard;
+  }
+  return fallback;
+}
+
+function isDiscordUserGuildMessageAllowed(params: {
+  groupPolicy: DiscordUserGroupPolicy;
+  guilds: DiscordUserGuildMap | undefined;
+  guildId: string | undefined;
+  channelId: string | undefined;
+}): boolean {
+  const { groupPolicy, guilds, guildId, channelId } = params;
+  if (!guildId || !channelId) return false;
+
+  if (groupPolicy === "disabled") {
+    return false;
+  }
+
+  const guildConfigured = Boolean(guilds && Object.keys(guilds).length > 0);
+  const guildEntry = resolveDiscordUserGuildEntry(guilds, guildId);
+  const channelsConfigured = Boolean(guildEntry?.channels && Object.keys(guildEntry.channels).length > 0);
+
+  if (groupPolicy === "open") {
+    if (!guildEntry) return true;
+    if (guildEntry.enabled === false) return false;
+    return resolveDiscordUserChannelAllowed(guildEntry.channels, channelId, true);
+  }
+
+  if (!guildConfigured) return false;
+  if (!guildEntry) return false;
+  if (guildEntry.enabled === false) return false;
+  if (!channelsConfigured) return true;
+  return resolveDiscordUserChannelAllowed(guildEntry.channels, channelId, false);
+}
+
+async function listDiscordUserDirectoryPeersFromConfig(params: {
+  cfg: any;
+  accountId?: string;
+  query?: string;
+  limit?: number;
+}): Promise<Array<{ kind: "user"; id: string }>> {
+  const account = resolveDiscordUserAccount({ cfg: params.cfg, accountId: params.accountId });
+  const q = params.query?.trim().toLowerCase() || "";
+
+  const ids = new Set<string>();
+  for (const entry of account.config.allowFrom ?? []) {
+    const normalized = normalizeDiscordUserId(String(entry));
+    if (normalized) {
+      ids.add(`user:${normalized}`);
+    }
+  }
+
+  return Array.from(ids)
+    .filter((id) => (q ? id.toLowerCase().includes(q) : true))
+    .slice(0, params.limit && params.limit > 0 ? params.limit : undefined)
+    .map((id) => ({ kind: "user" as const, id }));
+}
+
+async function listDiscordUserDirectoryGroupsFromConfig(params: {
+  cfg: any;
+  accountId?: string;
+  query?: string;
+  limit?: number;
+}): Promise<Array<{ kind: "group"; id: string }>> {
+  const account = resolveDiscordUserAccount({ cfg: params.cfg, accountId: params.accountId });
+  const q = params.query?.trim().toLowerCase() || "";
+
+  const ids = new Set<string>();
+  for (const guildEntry of Object.values(account.config.guilds ?? {})) {
+    for (const [rawChannelId, enabled] of Object.entries(guildEntry?.channels ?? {})) {
+      if (enabled === false) continue;
+      const normalized = normalizeDiscordChannelKey(rawChannelId);
+      if (!normalized || normalized === "*") continue;
+      ids.add(`channel:${normalized}`);
+    }
+  }
+
+  return Array.from(ids)
+    .filter((id) => (q ? id.toLowerCase().includes(q) : true))
+    .slice(0, params.limit && params.limit > 0 ? params.limit : undefined)
+    .map((id) => ({ kind: "group" as const, id }));
+}
+
+function normalizeDiscordVoiceChannelTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const mention = trimmed.match(/^<#(\d+)>$/);
+  const cleaned = (mention?.[1] ?? trimmed).replace(/^channel:/i, "").trim();
+  return /^\d{17,20}$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordGuildTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const cleaned = raw.trim().replace(/^(discord-user|discord|guild|server):/i, "").trim();
+  return /^\d{17,20}$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordUserTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const mention = raw.trim().match(/^<@!?(\d+)>$/);
+  const cleaned = (mention?.[1] ?? raw.trim())
+    .replace(/^(discord-user|discord|user):/i, "")
+    .trim();
+  return /^\d{17,20}$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordRoleTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const mention = raw.trim().match(/^<@&(\d+)>$/);
+  const cleaned = (mention?.[1] ?? raw.trim())
+    .replace(/^(discord-user|discord|role):/i, "")
+    .trim();
+  return /^\d{17,20}$/.test(cleaned) ? cleaned : null;
+}
+
+function normalizeDiscordChannelTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const mention = raw.trim().match(/^<#(\d+)>$/);
+  const cleaned = (mention?.[1] ?? raw.trim())
+    .replace(/^(discord-user|discord|channel|group):/i, "")
+    .trim();
+  return /^\d{17,20}$/.test(cleaned) ? cleaned : null;
+}
+
+function readOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function readOptionalText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function readRoleIdList(value: unknown): string[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+
+  const parsed = rawItems
+    .map((entry) => normalizeDiscordRoleTarget(String(entry)))
+    .filter((entry): entry is string => Boolean(entry));
+  return Array.from(new Set(parsed));
+}
+
+function normalizeDiscordGuildChannelType(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  const byAlias: Record<string, string> = {
+    text: "GUILD_TEXT",
+    news: "GUILD_NEWS",
+    announcement: "GUILD_NEWS",
+    voice: "GUILD_VOICE",
+    stage: "GUILD_STAGE_VOICE",
+    stage_voice: "GUILD_STAGE_VOICE",
+    stagevoice: "GUILD_STAGE_VOICE",
+    category: "GUILD_CATEGORY",
+    forum: "GUILD_FORUM",
+    media: "GUILD_MEDIA",
+    guild_text: "GUILD_TEXT",
+    guild_news: "GUILD_NEWS",
+    guild_voice: "GUILD_VOICE",
+    guild_stage_voice: "GUILD_STAGE_VOICE",
+    guild_category: "GUILD_CATEGORY",
+    guild_forum: "GUILD_FORUM",
+    guild_media: "GUILD_MEDIA",
+  };
+  return byAlias[normalized];
+}
+
+function resolveTimeoutDurationMs(params: any): number | null | undefined {
+  if (params.clear === true || params.remove === true) {
+    return null;
+  }
+
+  const durationMs = readOptionalNumber(params.durationMs);
+  if (durationMs !== undefined) {
+    return durationMs <= 0 ? null : durationMs;
+  }
+
+  const minutes = readOptionalNumber(params.minutes ?? params.durationMinutes);
+  if (minutes !== undefined) {
+    return minutes <= 0 ? null : Math.round(minutes * 60 * 1000);
+  }
+
+  const until = readOptionalText(params.until ?? params.untilAt);
+  if (until) {
+    const untilTs = Date.parse(until);
+    if (!Number.isFinite(untilTs)) {
+      return undefined;
+    }
+    const remaining = untilTs - Date.now();
+    return remaining <= 0 ? null : remaining;
+  }
+
+  return undefined;
+}
+
+function readOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 const meta = getChatChannelMeta("discord");
@@ -220,13 +517,19 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
     collectWarnings: ({ account, cfg }: any) => {
       const warnings: string[] = [];
-      const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
-      const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist";
+      const groupPolicy = resolveDiscordUserGroupPolicy(account, cfg);
+      const guildsConfigured = Boolean(account.config.guilds && Object.keys(account.config.guilds).length > 0);
 
       if (groupPolicy === "open") {
-        warnings.push(
-          `- Discord User: groupPolicy="open" allows any channel to trigger (mention-gated). Consider setting channels.discord-user.groupPolicy="allowlist".`
-        );
+        if (guildsConfigured) {
+          warnings.push(
+            `- Discord User: groupPolicy="open" allows all guild channels by default. Only explicit enabled:false rules in channels.discord-user.guilds can block channels.`
+          );
+        } else {
+          warnings.push(
+            `- Discord User: groupPolicy="open" with no guild allowlist allows all guild channels to trigger. Set channels.discord-user.groupPolicy="allowlist" and configure channels.discord-user.guilds to restrict access.`
+          );
+        }
       }
 
       return warnings;
@@ -274,8 +577,10 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         raw: { tag: client.user.tag },
       };
     },
-    listPeers: async () => [],
-    listGroups: async () => [],
+    listPeers: async ({ cfg, accountId, query, limit }: any) =>
+      listDiscordUserDirectoryPeersFromConfig({ cfg, accountId, query, limit }),
+    listGroups: async ({ cfg, accountId, query, limit }: any) =>
+      listDiscordUserDirectoryGroupsFromConfig({ cfg, accountId, query, limit }),
   },
   actions: {
     listActions: () => [
@@ -283,9 +588,30 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
       "setStatus",
       "addFriend",
       "removeFriend",
+      "callUser",
       "leaveGuild",
       "listGuilds",
       "joinGuild",
+      "listRoles",
+      "createRole",
+      "editRole",
+      "deleteRole",
+      "addRoleToUser",
+      "removeRoleFromUser",
+      "setUserRoles",
+      "setNickname",
+      "kickUser",
+      "banUser",
+      "unbanUser",
+      "timeoutUser",
+      "listChannels",
+      "createChannel",
+      "editChannel",
+      "deleteChannel",
+      "voiceJoin",
+      "voiceLeave",
+      "voiceStatus",
+      "setVoiceState",
       "editMessage",
       "deleteMessage",
       "typing",
@@ -299,9 +625,30 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
         "setStatus",
         "addFriend",
         "removeFriend",
+        "callUser",
         "leaveGuild",
         "listGuilds",
         "joinGuild",
+        "listRoles",
+        "createRole",
+        "editRole",
+        "deleteRole",
+        "addRoleToUser",
+        "removeRoleFromUser",
+        "setUserRoles",
+        "setNickname",
+        "kickUser",
+        "banUser",
+        "unbanUser",
+        "timeoutUser",
+        "listChannels",
+        "createChannel",
+        "editChannel",
+        "deleteChannel",
+        "voiceJoin",
+        "voiceLeave",
+        "voiceStatus",
+        "setVoiceState",
         "editMessage",
         "deleteMessage",
         "typing",
@@ -352,6 +699,13 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           return { ok: true };
         }
 
+        if (action === "callUser") {
+          const userId = normalizeDiscordUserTarget(params.userId || params.to);
+          if (!userId) return { ok: false, error: "Missing or invalid userId" };
+          const data = await client.callUser(userId);
+          return { ok: true, data };
+        }
+
         if (action === "leaveGuild") {
           const guildId = params.guildId;
           if (!guildId) return { ok: false, error: "Missing guildId" };
@@ -369,6 +723,378 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           if (!inviteCode) return { ok: false, error: "Missing inviteCode" };
           await client.joinGuild(inviteCode);
           return { ok: true };
+        }
+
+        if (action === "listRoles") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          if (!guildId) return { ok: false, error: "Missing or invalid guildId" };
+          const data = await client.listRoles(guildId);
+          return { ok: true, data };
+        }
+
+        if (action === "createRole") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const name = readOptionalText(params.name);
+          if (!guildId || !name) {
+            return { ok: false, error: "Missing guildId or role name" };
+          }
+
+          const color = params.color as number | string | undefined;
+          const hoist = readOptionalBoolean(params.hoist);
+          const mentionable = readOptionalBoolean(params.mentionable);
+          const position = readOptionalNumber(params.position);
+          const reason = readOptionalText(params.reason);
+
+          let permissions: string | string[] | number | undefined;
+          const permissionsInput = params.permissions ?? params.permissionBits ?? params.permissionList;
+          if (typeof permissionsInput === "number") {
+            permissions = permissionsInput;
+          } else if (Array.isArray(permissionsInput)) {
+            permissions = permissionsInput
+              .map((entry) => String(entry).trim())
+              .filter(Boolean);
+          } else if (typeof permissionsInput === "string") {
+            permissions = permissionsInput.includes(",")
+              ? permissionsInput.split(",").map((entry) => entry.trim()).filter(Boolean)
+              : permissionsInput.trim();
+          }
+
+          const data = await client.createRole({
+            guildId,
+            name,
+            color,
+            hoist,
+            mentionable,
+            permissions,
+            position,
+            reason,
+          });
+          return { ok: true, data };
+        }
+
+        if (action === "editRole") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const roleId = normalizeDiscordRoleTarget(params.roleId);
+          if (!guildId || !roleId) {
+            return { ok: false, error: "Missing or invalid guildId/roleId" };
+          }
+
+          const name = readOptionalText(params.name);
+          const color = params.color as number | string | undefined;
+          const hoist = readOptionalBoolean(params.hoist);
+          const mentionable = readOptionalBoolean(params.mentionable);
+          const position = readOptionalNumber(params.position);
+          const reason = readOptionalText(params.reason);
+
+          let permissions: string | string[] | number | undefined;
+          const permissionsInput = params.permissions ?? params.permissionBits ?? params.permissionList;
+          if (typeof permissionsInput === "number") {
+            permissions = permissionsInput;
+          } else if (Array.isArray(permissionsInput)) {
+            permissions = permissionsInput
+              .map((entry) => String(entry).trim())
+              .filter(Boolean);
+          } else if (typeof permissionsInput === "string") {
+            permissions = permissionsInput.includes(",")
+              ? permissionsInput.split(",").map((entry) => entry.trim()).filter(Boolean)
+              : permissionsInput.trim();
+          }
+
+          if (
+            name === undefined &&
+            color === undefined &&
+            hoist === undefined &&
+            mentionable === undefined &&
+            permissions === undefined &&
+            position === undefined
+          ) {
+            return { ok: false, error: "No editable role fields provided" };
+          }
+
+          const data = await client.editRole({
+            guildId,
+            roleId,
+            name,
+            color,
+            hoist,
+            mentionable,
+            permissions,
+            position,
+            reason,
+          });
+          return { ok: true, data };
+        }
+
+        if (action === "deleteRole") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const roleId = normalizeDiscordRoleTarget(params.roleId);
+          if (!guildId || !roleId) {
+            return { ok: false, error: "Missing or invalid guildId/roleId" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.deleteRole(guildId, roleId, reason);
+          return { ok: true };
+        }
+
+        if (action === "addRoleToUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          const roleId = normalizeDiscordRoleTarget(params.roleId);
+          if (!guildId || !userId || !roleId) {
+            return { ok: false, error: "Missing or invalid guildId/userId/roleId" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.addRoleToMember(guildId, userId, roleId, reason);
+          return { ok: true };
+        }
+
+        if (action === "removeRoleFromUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          const roleId = normalizeDiscordRoleTarget(params.roleId);
+          if (!guildId || !userId || !roleId) {
+            return { ok: false, error: "Missing or invalid guildId/userId/roleId" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.removeRoleFromMember(guildId, userId, roleId, reason);
+          return { ok: true };
+        }
+
+        if (action === "setUserRoles") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          const clear = params.clear === true;
+          const roleIds = clear ? [] : readRoleIdList(params.roleIds ?? params.roles);
+          if (!guildId || !userId || (!clear && roleIds.length === 0)) {
+            return { ok: false, error: "Missing or invalid guildId/userId/roleIds (or set clear=true)" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.setMemberRoles(guildId, userId, roleIds, reason);
+          return { ok: true };
+        }
+
+        if (action === "setNickname") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          if (!guildId || !userId) {
+            return { ok: false, error: "Missing or invalid guildId/userId" };
+          }
+
+          let nickname: string | null | undefined = undefined;
+          if (params.clear === true || params.nickname === null) {
+            nickname = null;
+          } else if (typeof params.nickname === "string") {
+            const trimmed = params.nickname.trim();
+            nickname = trimmed ? trimmed : null;
+          }
+          if (nickname === undefined) {
+            return { ok: false, error: "Missing nickname (or set clear=true)" };
+          }
+
+          const reason = readOptionalText(params.reason);
+          await client.setNickname(guildId, userId, nickname, reason);
+          return { ok: true };
+        }
+
+        if (action === "kickUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          if (!guildId || !userId) {
+            return { ok: false, error: "Missing or invalid guildId/userId" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.kickUser(guildId, userId, reason);
+          return { ok: true };
+        }
+
+        if (action === "banUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          if (!guildId || !userId) {
+            return { ok: false, error: "Missing or invalid guildId/userId" };
+          }
+
+          const reason = readOptionalText(params.reason);
+          const deleteMessageSeconds = readOptionalNumber(
+            params.deleteMessageSeconds ?? params.deleteSeconds
+          );
+          await client.banUser({
+            guildId,
+            userId,
+            reason,
+            deleteMessageSeconds,
+          });
+          return { ok: true };
+        }
+
+        if (action === "unbanUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          if (!guildId || !userId) {
+            return { ok: false, error: "Missing or invalid guildId/userId" };
+          }
+          const reason = readOptionalText(params.reason);
+          await client.unbanUser(guildId, userId, reason);
+          return { ok: true };
+        }
+
+        if (action === "timeoutUser") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const userId = normalizeDiscordUserTarget(params.userId);
+          if (!guildId || !userId) {
+            return { ok: false, error: "Missing or invalid guildId/userId" };
+          }
+
+          const durationMs = resolveTimeoutDurationMs(params);
+          if (durationMs === undefined) {
+            return { ok: false, error: "Missing timeout duration (minutes|durationMs|until|clear)" };
+          }
+
+          const reason = readOptionalText(params.reason);
+          await client.timeoutUser({ guildId, userId, durationMs, reason });
+          return { ok: true };
+        }
+
+        if (action === "listChannels") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          if (!guildId) return { ok: false, error: "Missing or invalid guildId" };
+          const data = await client.listGuildChannels(guildId);
+          return { ok: true, data };
+        }
+
+        if (action === "createChannel") {
+          const guildId = normalizeDiscordGuildTarget(params.guildId);
+          const name = readOptionalText(params.name);
+          if (!guildId || !name) {
+            return { ok: false, error: "Missing guildId or channel name" };
+          }
+
+          const type = normalizeDiscordGuildChannelType(params.type ?? params.channelType);
+          const parentRaw = params.parentId ?? params.parentChannelId;
+          let parentId: string | null | undefined = undefined;
+          if (parentRaw === null) {
+            parentId = null;
+          } else if (parentRaw !== undefined) {
+            parentId = normalizeDiscordChannelTarget(parentRaw);
+            if (!parentId) return { ok: false, error: "Invalid parentId" };
+          }
+
+          const topic =
+            params.topic === null
+              ? undefined
+              : readOptionalText(params.topic);
+          const nsfw = readOptionalBoolean(params.nsfw);
+          const rateLimitPerUser = readOptionalNumber(params.rateLimitPerUser ?? params.slowmode);
+          const bitrate = readOptionalNumber(params.bitrate);
+          const userLimit = readOptionalNumber(params.userLimit);
+          const rtcRegion =
+            params.rtcRegion === null
+              ? null
+              : readOptionalText(params.rtcRegion);
+          const reason = readOptionalText(params.reason);
+
+          const data = await client.createGuildChannel({
+            guildId,
+            name,
+            type,
+            parentId,
+            topic,
+            nsfw,
+            rateLimitPerUser,
+            bitrate,
+            userLimit,
+            rtcRegion,
+            reason,
+          });
+          return { ok: true, data };
+        }
+
+        if (action === "editChannel") {
+          const channelId = normalizeDiscordChannelTarget(params.channelId || params.to);
+          if (!channelId) return { ok: false, error: "Missing or invalid channelId" };
+
+          const name = readOptionalText(params.name);
+          const parentRaw = params.parentId ?? params.parentChannelId;
+          let parentId: string | null | undefined = undefined;
+          if (parentRaw === null) {
+            parentId = null;
+          } else if (parentRaw !== undefined) {
+            parentId = normalizeDiscordChannelTarget(parentRaw);
+            if (!parentId) return { ok: false, error: "Invalid parentId" };
+          }
+
+          let topic: string | null | undefined = undefined;
+          if (params.topic === null) {
+            topic = null;
+          } else {
+            topic = readOptionalText(params.topic);
+          }
+
+          const nsfw = readOptionalBoolean(params.nsfw);
+          const rateLimitPerUser = readOptionalNumber(params.rateLimitPerUser ?? params.slowmode);
+          const bitrate = readOptionalNumber(params.bitrate);
+          const userLimit = readOptionalNumber(params.userLimit);
+          const position = readOptionalNumber(params.position);
+          const rtcRegion =
+            params.rtcRegion === null
+              ? null
+              : readOptionalText(params.rtcRegion);
+          const reason = readOptionalText(params.reason);
+
+          const data = await client.editGuildChannel({
+            channelId,
+            name,
+            parentId,
+            topic,
+            nsfw,
+            rateLimitPerUser,
+            bitrate,
+            userLimit,
+            rtcRegion,
+            position,
+            reason,
+          });
+          return { ok: true, data };
+        }
+
+        if (action === "deleteChannel") {
+          const channelId = normalizeDiscordChannelTarget(params.channelId || params.to);
+          if (!channelId) return { ok: false, error: "Missing or invalid channelId" };
+          const reason = readOptionalText(params.reason);
+          await client.deleteGuildChannel(channelId, reason);
+          return { ok: true };
+        }
+
+        if (action === "voiceJoin") {
+          const channelId = normalizeDiscordVoiceChannelTarget(params.channelId || params.to);
+          if (!channelId) return { ok: false, error: "Missing or invalid channelId" };
+          const selfMute = readOptionalBoolean(params.selfMute ?? params.mute);
+          const selfDeaf = readOptionalBoolean(params.selfDeaf ?? params.deaf);
+          const selfVideo = readOptionalBoolean(params.selfVideo ?? params.video);
+          const data = await client.joinVoice(channelId, { selfMute, selfDeaf, selfVideo });
+          return { ok: true, data };
+        }
+
+        if (action === "voiceLeave") {
+          await client.leaveVoice();
+          return { ok: true };
+        }
+
+        if (action === "voiceStatus") {
+          const data = await client.getVoiceStatus();
+          return { ok: true, data };
+        }
+
+        if (action === "setVoiceState") {
+          const selfMute = readOptionalBoolean(params.selfMute ?? params.mute);
+          const selfDeaf = readOptionalBoolean(params.selfDeaf ?? params.deaf);
+          const selfVideo = readOptionalBoolean(params.selfVideo ?? params.video);
+          if (selfMute === undefined && selfDeaf === undefined && selfVideo === undefined) {
+            return { ok: false, error: "Missing voice state param (selfMute/selfDeaf/selfVideo)" };
+          }
+          await client.setVoiceState({ selfMute, selfDeaf, selfVideo });
+          const data = await client.getVoiceStatus();
+          return { ok: true, data };
         }
 
         if (action === "editMessage") {
@@ -531,11 +1257,28 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           try {
             const cfg = loadConfig?.() ?? ctx.cfg;
             const client = clients.get(account.accountId);
+            const resolvedAccount = resolveDiscordUserAccount({ cfg, accountId: account.accountId });
 
             const isDM = message.isDM;
             const wasMentioned = message.mentions?.some((m: any) => m.id === client?.user?.id) ?? false;
-            
-            if (!isDM && !wasMentioned) {
+
+            const groupPolicy = resolveDiscordUserGroupPolicy(resolvedAccount, cfg);
+            const requireMention = groupPolicy !== "open";
+            const isGuildMessage = !isDM && Boolean(message.guildId);
+
+            if (isGuildMessage) {
+              const allowed = isDiscordUserGuildMessageAllowed({
+                groupPolicy,
+                guilds: resolvedAccount.config.guilds,
+                guildId: message.guildId,
+                channelId: message.channelId,
+              });
+              if (!allowed) {
+                return;
+              }
+            }
+
+            if (!isDM && requireMention && !wasMentioned) {
               return;
             }
             
@@ -696,5 +1439,3 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     },
   },
 };
-
-

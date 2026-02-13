@@ -74,6 +74,45 @@ export class DiscordUserClient {
     return this._user;
   }
 
+  private async fetchGuildOrThrow(guildId: string): Promise<any> {
+    const guild = await this.client.guilds.fetch(guildId);
+    if (!guild) {
+      throw new Error(`Guild ${guildId} not found`);
+    }
+    return guild;
+  }
+
+  private summarizeGuildChannel(channel: any): {
+    id: string;
+    guildId?: string;
+    name?: string;
+    type: string;
+    parentId?: string | null;
+    position?: number;
+    topic?: string | null;
+    nsfw?: boolean;
+    rateLimitPerUser?: number | null;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+  } {
+    return {
+      id: String(channel.id),
+      guildId: channel.guild?.id,
+      name: channel.name,
+      type: String(channel.type),
+      parentId: channel.parentId ?? null,
+      position: typeof channel.position === "number" ? channel.position : undefined,
+      topic: channel.topic ?? null,
+      nsfw: typeof channel.nsfw === "boolean" ? channel.nsfw : undefined,
+      rateLimitPerUser:
+        typeof channel.rateLimitPerUser === "number" ? channel.rateLimitPerUser : undefined,
+      bitrate: typeof channel.bitrate === "number" ? channel.bitrate : undefined,
+      userLimit: typeof channel.userLimit === "number" ? channel.userLimit : undefined,
+      rtcRegion: typeof channel.rtcRegion === "string" || channel.rtcRegion === null ? channel.rtcRegion : undefined,
+    };
+  }
+
   private setupEventHandlers(): void {
     this.client.on("ready", () => {
       if (this.client.user) {
@@ -298,6 +337,94 @@ export class DiscordUserClient {
     this.client.user.setActivity(status, { type: type as any });
   }
 
+  async callUser(userId: string): Promise<{ channelId: string }> {
+    const user = await this.client.users.fetch(userId);
+    const dm = await user.createDM();
+    if (typeof (dm as any).ring !== "function") {
+      throw new Error("DM voice calling is not supported in this client version");
+    }
+    await (dm as any).ring();
+    return { channelId: dm.id };
+  }
+
+  async joinVoice(
+    channelId: string,
+    options?: { selfMute?: boolean; selfDeaf?: boolean; selfVideo?: boolean }
+  ): Promise<{ channelId: string; guildId?: string; status: string }> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel) {
+      throw new Error(`Channel ${channelId} not found`);
+    }
+
+    const channelType = String((channel as any).type);
+    const voiceCapableTypes = new Set(["GUILD_VOICE", "GUILD_STAGE_VOICE", "DM", "GROUP_DM"]);
+    if (!voiceCapableTypes.has(channelType)) {
+      throw new Error(`Channel ${channelId} is not a voice-capable channel`);
+    }
+
+    const connection = await this.client.voice.joinChannel(channel as any, {
+      selfMute: options?.selfMute,
+      selfDeaf: options?.selfDeaf,
+      selfVideo: options?.selfVideo,
+    });
+
+    return {
+      channelId: connection.channel.id,
+      guildId: (connection.channel as any).guild?.id,
+      status: String(connection.status),
+    };
+  }
+
+  async leaveVoice(): Promise<void> {
+    const connection = this.client.voice.connection;
+    if (!connection) return;
+    connection.disconnect();
+  }
+
+  async setVoiceState(params: {
+    selfMute?: boolean;
+    selfDeaf?: boolean;
+    selfVideo?: boolean;
+  }): Promise<void> {
+    const connection = this.client.voice.connection;
+    if (!connection) {
+      throw new Error("Not connected to a voice channel");
+    }
+
+    const voice = this.client.user?.voice;
+    await connection.sendVoiceStateUpdate({
+      self_mute: params.selfMute ?? voice?.selfMute ?? false,
+      self_deaf: params.selfDeaf ?? voice?.selfDeaf ?? false,
+      self_video: params.selfVideo ?? voice?.selfVideo ?? false,
+    });
+  }
+
+  async getVoiceStatus(): Promise<{
+    connected: boolean;
+    channelId?: string;
+    guildId?: string;
+    channelType?: string;
+    status?: string;
+    selfMute?: boolean | null;
+    selfDeaf?: boolean | null;
+    selfVideo?: boolean | null;
+  }> {
+    const connection = this.client.voice.connection;
+    const voice = this.client.user?.voice;
+    const connected = Boolean(connection);
+
+    return {
+      connected,
+      channelId: connection?.channel?.id ?? voice?.channelId ?? undefined,
+      guildId: (connection?.channel as any)?.guild?.id,
+      channelType: connection ? String((connection.channel as any).type) : undefined,
+      status: connection ? String(connection.status) : undefined,
+      selfMute: voice?.selfMute ?? null,
+      selfDeaf: voice?.selfDeaf ?? null,
+      selfVideo: voice?.selfVideo ?? null,
+    };
+  }
+
   async acceptFriendRequest(userId: string): Promise<void> {
     // @ts-ignore
     if (this.client.relationships) {
@@ -328,6 +455,293 @@ export class DiscordUserClient {
           name: g.name,
           memberCount: g.memberCount
       }));
+  }
+
+  async listRoles(guildId: string): Promise<Array<{
+    id: string;
+    name: string;
+    color: number;
+    hexColor: string;
+    position: number;
+    mentionable: boolean;
+    hoist: boolean;
+    managed: boolean;
+    permissions: string;
+  }>> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    await guild.roles.fetch();
+    return guild.roles.cache
+      .sort((a: any, b: any) => b.position - a.position)
+      .map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        color: role.color,
+        hexColor: role.hexColor,
+        position: role.position,
+        mentionable: role.mentionable,
+        hoist: role.hoist,
+        managed: role.managed,
+        permissions: role.permissions?.bitfield?.toString?.() ?? "",
+      }));
+  }
+
+  async createRole(params: {
+    guildId: string;
+    name: string;
+    color?: number | string;
+    hoist?: boolean;
+    mentionable?: boolean;
+    permissions?: string | string[] | number;
+    position?: number;
+    reason?: string;
+  }): Promise<{ id: string; name: string }> {
+    const guild = await this.fetchGuildOrThrow(params.guildId);
+    const role = await guild.roles.create({
+      name: params.name,
+      color: params.color,
+      hoist: params.hoist,
+      mentionable: params.mentionable,
+      permissions: params.permissions as any,
+      position: params.position,
+      reason: params.reason,
+    });
+    return { id: role.id, name: role.name };
+  }
+
+  async editRole(params: {
+    guildId: string;
+    roleId: string;
+    name?: string;
+    color?: number | string;
+    hoist?: boolean;
+    mentionable?: boolean;
+    permissions?: string | string[] | number;
+    position?: number;
+    reason?: string;
+  }): Promise<{ id: string; name: string }> {
+    const guild = await this.fetchGuildOrThrow(params.guildId);
+    const role = await guild.roles.edit(
+      params.roleId,
+      {
+        name: params.name,
+        color: params.color,
+        hoist: params.hoist,
+        mentionable: params.mentionable,
+        permissions: params.permissions as any,
+        position: params.position,
+      },
+      params.reason
+    );
+    return { id: role.id, name: role.name };
+  }
+
+  async deleteRole(guildId: string, roleId: string, reason?: string): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    await guild.roles.delete(roleId, reason);
+  }
+
+  async addRoleToMember(
+    guildId: string,
+    userId: string,
+    roleId: string,
+    reason?: string
+  ): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    const member = await guild.members.fetch(userId);
+    await member.roles.add(roleId, reason);
+  }
+
+  async removeRoleFromMember(
+    guildId: string,
+    userId: string,
+    roleId: string,
+    reason?: string
+  ): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    const member = await guild.members.fetch(userId);
+    await member.roles.remove(roleId, reason);
+  }
+
+  async setMemberRoles(
+    guildId: string,
+    userId: string,
+    roleIds: string[],
+    reason?: string
+  ): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    const member = await guild.members.fetch(userId);
+    await member.roles.set(roleIds, reason);
+  }
+
+  async setNickname(
+    guildId: string,
+    userId: string,
+    nickname: string | null,
+    reason?: string
+  ): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    const member = await guild.members.fetch(userId);
+    await member.setNickname(nickname, reason);
+  }
+
+  async kickUser(guildId: string, userId: string, reason?: string): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    await guild.members.kick(userId, reason);
+  }
+
+  async banUser(params: {
+    guildId: string;
+    userId: string;
+    reason?: string;
+    deleteMessageSeconds?: number;
+  }): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(params.guildId);
+    await guild.members.ban(params.userId, {
+      reason: params.reason,
+      deleteMessageSeconds: params.deleteMessageSeconds,
+    });
+  }
+
+  async unbanUser(guildId: string, userId: string, reason?: string): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    await guild.members.unban(userId, reason);
+  }
+
+  async timeoutUser(params: {
+    guildId: string;
+    userId: string;
+    durationMs: number | null;
+    reason?: string;
+  }): Promise<void> {
+    const guild = await this.fetchGuildOrThrow(params.guildId);
+    const member = await guild.members.fetch(params.userId);
+    await member.timeout(params.durationMs, params.reason);
+  }
+
+  async listGuildChannels(guildId: string): Promise<Array<{
+    id: string;
+    guildId?: string;
+    name?: string;
+    type: string;
+    parentId?: string | null;
+    position?: number;
+    topic?: string | null;
+    nsfw?: boolean;
+    rateLimitPerUser?: number | null;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+  }>> {
+    const guild = await this.fetchGuildOrThrow(guildId);
+    await guild.channels.fetch();
+    return guild.channels.cache
+      .filter((channel: any) => Boolean(channel))
+      .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
+      .map((channel: any) => this.summarizeGuildChannel(channel));
+  }
+
+  async createGuildChannel(params: {
+    guildId: string;
+    name: string;
+    type?: string;
+    parentId?: string | null;
+    topic?: string;
+    nsfw?: boolean;
+    rateLimitPerUser?: number;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+    reason?: string;
+  }): Promise<{
+    id: string;
+    guildId?: string;
+    name?: string;
+    type: string;
+    parentId?: string | null;
+    position?: number;
+    topic?: string | null;
+    nsfw?: boolean;
+    rateLimitPerUser?: number | null;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+  }> {
+    const guild = await this.fetchGuildOrThrow(params.guildId);
+    const created = await guild.channels.create(params.name, {
+      type: params.type as any,
+      parent: params.parentId ?? undefined,
+      topic: params.topic,
+      nsfw: params.nsfw,
+      rateLimitPerUser: params.rateLimitPerUser,
+      bitrate: params.bitrate,
+      userLimit: params.userLimit,
+      rtcRegion: params.rtcRegion ?? undefined,
+      reason: params.reason,
+    });
+    return this.summarizeGuildChannel(created);
+  }
+
+  async editGuildChannel(params: {
+    channelId: string;
+    name?: string;
+    parentId?: string | null;
+    topic?: string | null;
+    nsfw?: boolean;
+    rateLimitPerUser?: number;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+    position?: number;
+    reason?: string;
+  }): Promise<{
+    id: string;
+    guildId?: string;
+    name?: string;
+    type: string;
+    parentId?: string | null;
+    position?: number;
+    topic?: string | null;
+    nsfw?: boolean;
+    rateLimitPerUser?: number | null;
+    bitrate?: number;
+    userLimit?: number;
+    rtcRegion?: string | null;
+  }> {
+    const fetched = await this.client.channels.fetch(params.channelId);
+    if (!fetched || !("guild" in (fetched as any))) {
+      throw new Error(`Guild channel ${params.channelId} not found`);
+    }
+    const channel = fetched as any;
+    const guild = channel.guild;
+    if (!guild) {
+      throw new Error(`Guild channel ${params.channelId} not found`);
+    }
+
+    const patch: any = {};
+    if (typeof params.name === "string") patch.name = params.name;
+    if (typeof params.parentId === "string" || params.parentId === null) patch.parent = params.parentId;
+    if (typeof params.topic === "string" || params.topic === null) patch.topic = params.topic;
+    if (typeof params.nsfw === "boolean") patch.nsfw = params.nsfw;
+    if (typeof params.rateLimitPerUser === "number") patch.rateLimitPerUser = params.rateLimitPerUser;
+    if (typeof params.bitrate === "number") patch.bitrate = params.bitrate;
+    if (typeof params.userLimit === "number") patch.userLimit = params.userLimit;
+    if (typeof params.rtcRegion === "string" || params.rtcRegion === null) patch.rtcRegion = params.rtcRegion;
+    if (typeof params.position === "number") patch.position = params.position;
+
+    if (Object.keys(patch).length === 0) {
+      throw new Error("No editable channel fields provided");
+    }
+
+    const edited = await guild.channels.edit(params.channelId, patch, params.reason);
+    return this.summarizeGuildChannel(edited);
+  }
+
+  async deleteGuildChannel(channelId: string, reason?: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || typeof (channel as any).delete !== "function") {
+      throw new Error(`Channel ${channelId} not found`);
+    }
+    await (channel as any).delete(reason);
   }
 
   async leaveGuild(guildId: string): Promise<void> {
