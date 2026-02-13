@@ -10,5 +10,15 @@
     "reactions": true,
     "threads": true,
     "media": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "token": { "type": "string", "description": "Discord user token" },
+      "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist"], "default": "pairing" },
+      "allowFrom": { "type": "array", "items": { "type": "string" } },
+      "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "default": "allowlist" },
+      "guilds": { "type": "object" }
+    }
   }
 }
