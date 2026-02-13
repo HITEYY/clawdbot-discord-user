@@ -1,6 +1,6 @@
 # @alex110709/discord-user
 
-Clawdbot plugin for Discord **user account** (selfbot) integration. This allows Clawdbot to act as a real Discord user, not a bot.
+openclaw plugin for Discord **user account** (selfbot) integration. This allows openclaw to act as a real Discord user, not a bot.
 
 > ⚠️ **Warning**: Using selfbots violates Discord's Terms of Service. Your account may be banned. Use at your own risk. This plugin is intended for personal automation and testing purposes only.
 
@@ -20,7 +20,7 @@ Clawdbot plugin for Discord **user account** (selfbot) integration. This allows 
 ### From npm (when published)
 
 ```bash
-clawdbot plugins install @alex110709/discord-user
+openclaw plugins install @alex110709/discord-user
 ```
 
 ### From local directory
@@ -31,8 +31,8 @@ cd discord-user-plugin
 npm install
 npm run build
 
-# Install to Clawdbot
-clawdbot plugins install -l ./discord-user-plugin
+# Install to openclaw
+openclaw plugins install -l ./discord-user-plugin
 ```
 
 ## Configuration
@@ -54,7 +54,7 @@ Or use browser console:
 
 ### Config file
 
-Add to your Clawdbot config (`~/.clawdbot/config.json5`):
+Add to your openclaw config (`~/.openclaw/config.json5`):
 
 ```json5
 {
@@ -143,20 +143,20 @@ export DISCORD_USER_TOKEN="your_token_here"
 
 ## Usage
 
-Once configured and the gateway is running, Clawdbot will:
+Once configured and the gateway is running, openclaw will:
 
 1. Log in as the Discord user
 2. Listen for messages in allowed channels/DMs
-3. Respond as configured by your Clawdbot setup
+3. Respond as configured by your openclaw setup
 
 ### Sending messages
 
-The plugin integrates with Clawdbot's messaging system. You can send messages using:
+The plugin integrates with openclaw's messaging system. You can send messages using:
 
 ```bash
 # CLI
-clawdbot send --channel discord-user --to "channel:CHANNEL_ID" "Hello!"
-clawdbot send --channel discord-user --to "user:USER_ID" "Hello!"
+openclaw send --channel discord-user --to "channel:CHANNEL_ID" "Hello!"
+openclaw send --channel discord-user --to "user:USER_ID" "Hello!"
 
 # Or via message tool in agent
 message action=send channel=discord-user to="channel:123456789" message="Hello!"

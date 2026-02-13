@@ -2,12 +2,12 @@
   "name": "@alex110709/discord-user",
   "version": "1.0.1",
   "type": "module",
-  "description": "Clawdbot Discord user account (selfbot) channel plugin",
+  "description": "openclaw Discord user account (selfbot) channel plugin",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "clawdbot.plugin.json",
+    "openclaw.plugin.json",
     "README.md",
     "LICENSE"
   ],
@@ -17,18 +17,18 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build"
   },
-  "clawdbot": {
+  "openclaw": {
     "extensions": [
       "./dist/index.js"
     ]
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HITEYY/clawdbot-discord-user.git"
+    "url": "git+https://github.com/HITEYY/openclaw-discord-user.git"
   },
-  "homepage": "https://github.com/HITEYY/clawdbot-discord-user#readme",
+  "homepage": "https://github.com/HITEYY/openclaw-discord-user#readme",
   "bugs": {
-    "url": "https://github.com/HITEYY/clawdbot-discord-user/issues"
+    "url": "https://github.com/HITEYY/openclaw-discord-user/issues"
   },
   "author": "HITEYY",
   "license": "MIT",
@@ -36,16 +36,16 @@
     "discord.js-selfbot-v13": "^3.5.2"
   },
   "peerDependencies": {
-    "clawdbot": "*"
+    "openclaw": "*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   },
   "keywords": [
-    "clawdbot",
-    "clawdbot-plugin",
-    "clawdbot-extension",
+    "openclaw",
+    "openclaw-plugin",
+    "openclaw-extension",
     "discord",
     "discord-selfbot",
     "selfbot",

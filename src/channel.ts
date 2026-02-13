@@ -1,36 +1,36 @@
-import type { ChannelPlugin, ChannelMessageActionAdapter } from "clawdbot/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId, getChatChannelMeta } from "clawdbot/plugin-sdk";
+import type { ChannelPlugin, ChannelMessageActionAdapter } from "openclaw/plugin-sdk";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId, getChatChannelMeta } from "openclaw/plugin-sdk";
 import { DiscordUserClient, type DiscordUserAccount } from "./client.js";
 import { createRequire } from "node:module";
 
-// Dynamic import of Clawdbot internals (may break on version updates)
+// Dynamic import of openclaw internals (may break on version updates)
 let dispatchInboundMessage: ((params: any) => Promise<any>) | null = null;
 let createReplyDispatcherWithTyping: ((params: any) => any) | null = null;
 let buildAgentPeerSessionKey: ((params: any) => string) | null = null;
 let loadConfig: (() => any) | null = null;
-let clawdbotBasePath: string = "";
+let openclawBasePath: string = "";
 
 async function initDispatch() {
   try {
     const require = createRequire(import.meta.url);
-    const clawdbotPath = require.resolve("clawdbot");
-    clawdbotBasePath = clawdbotPath.replace(/\/dist\/.*$/, "");
+    const openclawPath = require.resolve("openclaw");
+    openclawBasePath = openclawPath.replace(/\/dist\/.*$/, "");
     
-    const dispatchMod = await import(`${clawdbotBasePath}/dist/auto-reply/dispatch.js`);
+    const dispatchMod = await import(`${openclawBasePath}/dist/auto-reply/dispatch.js`);
     dispatchInboundMessage = dispatchMod.dispatchInboundMessage;
     
-    const dispatcherMod = await import(`${clawdbotBasePath}/dist/auto-reply/reply/reply-dispatcher.js`);
+    const dispatcherMod = await import(`${openclawBasePath}/dist/auto-reply/reply/reply-dispatcher.js`);
     createReplyDispatcherWithTyping = dispatcherMod.createReplyDispatcherWithTyping;
     
-    const sessionKeyMod = await import(`${clawdbotBasePath}/dist/routing/session-key.js`);
+    const sessionKeyMod = await import(`${openclawBasePath}/dist/routing/session-key.js`);
     buildAgentPeerSessionKey = sessionKeyMod.buildAgentPeerSessionKey;
     
-    const configMod = await import(`${clawdbotBasePath}/dist/config/config.js`);
+    const configMod = await import(`${openclawBasePath}/dist/config/config.js`);
     loadConfig = configMod.loadConfig;
     
-    console.log("[discord-user] Successfully loaded Clawdbot dispatch functions");
+    console.log("[discord-user] Successfully loaded openclaw dispatch functions");
   } catch (err) {
-    console.error("[discord-user] Failed to load Clawdbot dispatch functions:", err);
+    console.error("[discord-user] Failed to load openclaw dispatch functions:", err);
   }
 }
 

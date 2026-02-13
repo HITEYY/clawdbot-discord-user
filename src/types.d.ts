@@ -1,4 +1,4 @@
-declare module "clawdbot/plugin-sdk" {
+declare module "openclaw/plugin-sdk" {
   export const DEFAULT_ACCOUNT_ID: string;
   export function normalizeAccountId(id: string): string;
   export function getChatChannelMeta(id: string): any;
