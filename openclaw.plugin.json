@@ -2,7 +2,7 @@
   "id": "discord-user",
   "name": "Discord User",
   "description": "Discord user account (selfbot) integration - act as a real Discord user.",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "author": "HITEYY",
   "homepage": "https://github.com/HITEYY/openclaw-discord-user",
   "capabilities": {
