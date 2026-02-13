@@ -355,6 +355,40 @@ export class DiscordUserClient {
     return messages.map((m) => this.transformMessage(m)).reverse();
   }
 
+  async getChannelInfo(channelId: string): Promise<{
+    id: string;
+    type: string;
+    name?: string;
+    guildId?: string;
+    guildName?: string;
+  }> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel) {
+      throw new Error(`Channel ${channelId} not found`);
+    }
+
+    const maybeGuildChannel = channel as any;
+
+    return {
+      id: channel.id,
+      type: String(channel.type),
+      name: (channel as any).name,
+      guildId: maybeGuildChannel.guild?.id,
+      guildName: maybeGuildChannel.guild?.name,
+    };
+  }
+
+  async fetchMessage(channelId: string, messageId: string): Promise<InboundMessage> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !("messages" in channel)) {
+      throw new Error(`Channel ${channelId} not found`);
+    }
+
+    const textChannel = channel as TextChannel | DMChannel | ThreadChannel | NewsChannel;
+    const message = await textChannel.messages.fetch(messageId);
+    return this.transformMessage(message);
+  }
+
   async probe(token: string): Promise<any> {
       // Create a temporary client to probe
       const tempClient = new Client({ checkUpdate: false } as any);
@@ -377,4 +411,3 @@ export class DiscordUserClient {
       }
   }
 }
-

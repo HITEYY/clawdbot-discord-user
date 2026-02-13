@@ -140,6 +140,19 @@ message action=send channel=discord-user to="channel:123456789" message="Hello!"
 - `user:USER_ID` - Send to a user's DM
 - `CHANNEL_ID` - Raw channel ID (sends to channel)
 
+
+### Extended actions
+
+The plugin also exposes action endpoints for advanced channel control:
+
+- `react` / `deleteMessage` / `editMessage`
+- `typing`
+- `fetchMessages` / `fetchMessage`
+- `getChannelInfo`
+- `setStatus`
+- `addFriend` / `removeFriend`
+- `listGuilds` / `leaveGuild` / `joinGuild`
+
 ## Security Considerations
 
 1. **Token Security**: Your Discord token is equivalent to your password. Keep it secret.

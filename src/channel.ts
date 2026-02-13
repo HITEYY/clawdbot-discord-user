@@ -278,8 +278,37 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
     listGroups: async () => [],
   },
   actions: {
-    listActions: () => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"],
-    supportsAction: ({ action }: any) => ["react", "setStatus", "addFriend", "removeFriend", "leaveGuild", "listGuilds", "joinGuild"].includes(action),
+    listActions: () => [
+      "react",
+      "setStatus",
+      "addFriend",
+      "removeFriend",
+      "leaveGuild",
+      "listGuilds",
+      "joinGuild",
+      "editMessage",
+      "deleteMessage",
+      "typing",
+      "fetchMessages",
+      "fetchMessage",
+      "getChannelInfo",
+    ],
+    supportsAction: ({ action }: any) =>
+      [
+        "react",
+        "setStatus",
+        "addFriend",
+        "removeFriend",
+        "leaveGuild",
+        "listGuilds",
+        "joinGuild",
+        "editMessage",
+        "deleteMessage",
+        "typing",
+        "fetchMessages",
+        "fetchMessage",
+        "getChannelInfo",
+      ].includes(action),
     handleAction: async ({ action, params, cfg, accountId }: any) => {
       const account = resolveDiscordUserAccount({ cfg, accountId });
       const client = clients.get(account.accountId);
@@ -300,46 +329,99 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
           await client.react(channelId, messageId, emoji, remove);
           return { ok: true };
         }
-        
+
         if (action === "setStatus") {
-            const status = params.status || params.text;
-            const type = params.type || "PLAYING";
-            if (!status) return { ok: false, error: "Missing status text" };
-            await client.setStatus(status, type);
-            return { ok: true };
+          const status = params.status || params.text;
+          const type = params.type || "PLAYING";
+          if (!status) return { ok: false, error: "Missing status text" };
+          await client.setStatus(status, type);
+          return { ok: true };
         }
 
         if (action === "addFriend") {
-            const userId = params.userId || params.to;
-            if (!userId) return { ok: false, error: "Missing userId" };
-            await client.acceptFriendRequest(userId);
-            return { ok: true };
+          const userId = params.userId || params.to;
+          if (!userId) return { ok: false, error: "Missing userId" };
+          await client.acceptFriendRequest(userId);
+          return { ok: true };
         }
 
         if (action === "removeFriend") {
-             const userId = params.userId || params.to;
-             if (!userId) return { ok: false, error: "Missing userId" };
-             await client.removeFriend(userId);
-             return { ok: true };
+          const userId = params.userId || params.to;
+          if (!userId) return { ok: false, error: "Missing userId" };
+          await client.removeFriend(userId);
+          return { ok: true };
         }
 
         if (action === "leaveGuild") {
-             const guildId = params.guildId;
-             if (!guildId) return { ok: false, error: "Missing guildId" };
-             await client.leaveGuild(guildId);
-             return { ok: true };
+          const guildId = params.guildId;
+          if (!guildId) return { ok: false, error: "Missing guildId" };
+          await client.leaveGuild(guildId);
+          return { ok: true };
         }
-        
+
         if (action === "listGuilds") {
-            const guilds = await client.getGuilds();
-            return { ok: true, data: guilds };
+          const guilds = await client.getGuilds();
+          return { ok: true, data: guilds };
         }
 
         if (action === "joinGuild") {
-            const inviteCode = params.inviteCode || params.code || params.invite;
-            if (!inviteCode) return { ok: false, error: "Missing inviteCode" };
-            await client.joinGuild(inviteCode);
-            return { ok: true };
+          const inviteCode = params.inviteCode || params.code || params.invite;
+          if (!inviteCode) return { ok: false, error: "Missing inviteCode" };
+          await client.joinGuild(inviteCode);
+          return { ok: true };
+        }
+
+        if (action === "editMessage") {
+          const channelId = params.channelId || params.to;
+          const messageId = params.messageId;
+          const content = params.content ?? params.text;
+          if (!channelId || !messageId || typeof content !== "string") {
+            return { ok: false, error: "Missing channelId, messageId, or content" };
+          }
+          await client.editMessage(channelId, messageId, content);
+          return { ok: true };
+        }
+
+        if (action === "deleteMessage") {
+          const channelId = params.channelId || params.to;
+          const messageId = params.messageId;
+          if (!channelId || !messageId) {
+            return { ok: false, error: "Missing channelId or messageId" };
+          }
+          await client.deleteMessage(channelId, messageId);
+          return { ok: true };
+        }
+
+        if (action === "typing") {
+          const channelId = params.channelId || params.to;
+          if (!channelId) return { ok: false, error: "Missing channelId" };
+          await client.typing(channelId);
+          return { ok: true };
+        }
+
+        if (action === "fetchMessages") {
+          const channelId = params.channelId || params.to;
+          const limit = Number(params.limit ?? params.count ?? account.config.historyLimit ?? 10);
+          if (!channelId) return { ok: false, error: "Missing channelId" };
+          const messages = await client.fetchMessages(channelId, Number.isFinite(limit) ? limit : 10);
+          return { ok: true, data: messages };
+        }
+
+        if (action === "fetchMessage") {
+          const channelId = params.channelId || params.to;
+          const messageId = params.messageId;
+          if (!channelId || !messageId) {
+            return { ok: false, error: "Missing channelId or messageId" };
+          }
+          const message = await client.fetchMessage(channelId, messageId);
+          return { ok: true, data: message };
+        }
+
+        if (action === "getChannelInfo") {
+          const channelId = params.channelId || params.to;
+          if (!channelId) return { ok: false, error: "Missing channelId" };
+          const info = await client.getChannelInfo(channelId);
+          return { ok: true, data: info };
         }
 
         throw new Error(`Action ${action} is not supported for discord-user.`);
