@@ -141,6 +141,11 @@ export DISCORD_USER_TOKEN="your_token_here"
 }
 ```
 
+### Default agent behavior
+
+Inbound Discord messages are now routed to the **default agent** from `agents.list` (`default: true`).
+If no agent is marked as default, the plugin falls back to the first agent in the list, and then to `main`.
+
 ## Usage
 
 Once configured and the gateway is running, openclaw will:

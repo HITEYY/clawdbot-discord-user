@@ -123,6 +123,23 @@ function resolveDefaultDiscordUserAccountId(cfg: any): string {
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
 }
 
+function resolveDefaultAgentId(cfg: any): string {
+  const agents = cfg?.agents?.list;
+  if (Array.isArray(agents)) {
+    const defaultAgent = agents.find((entry: any) => entry?.default === true && typeof entry?.id === "string");
+    if (defaultAgent?.id) {
+      return defaultAgent.id;
+    }
+
+    const firstAgent = agents.find((entry: any) => typeof entry?.id === "string");
+    if (firstAgent?.id) {
+      return firstAgent.id;
+    }
+  }
+
+  return "main";
+}
+
 type DiscordUserGroupPolicy = "open" | "allowlist" | "disabled";
 type DiscordUserGuildMap = Record<string, { enabled?: boolean; channels?: Record<string, boolean> }>;
 
@@ -1283,9 +1300,10 @@ export const discordUserPlugin: ChannelPlugin<ResolvedDiscordUserAccount> = {
             
             const peerKind = message.isDM ? "dm" : message.isThread ? "thread" : "channel";
             const peerId = message.isDM ? message.authorId : message.channelId;
+            const agentId = resolveDefaultAgentId(cfg);
             
             const sessionKey = buildAgentPeerSessionKey({
-              agentId: "main",
+              agentId,
               mainKey: "main",
               channel: "discord-user",
               peerKind: peerKind,
